@@ -1,0 +1,27 @@
+[project]
+name = "hardshell-telemetry"
+version = "0.0.0"
+description = "Official Hardshell client for sending AI/RAG telemetry and reading derived reports — placeholder pre-release"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Hardshell", email = "ben@hardshell.ai" }]
+keywords = ["telemetry", "rag", "retrieval", "ai", "security", "observability"]
+classifiers = [
+    "Development Status :: 1 - Planning",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Security",
+    "Topic :: System :: Monitoring",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://hardshell.ai"
+Source = "https://github.com/hardshellinc/hardshell-telemetry"
+
+[build-system]
+requires = ["uv_build>=0.10,<0.11"]
+build-backend = "uv_build"
