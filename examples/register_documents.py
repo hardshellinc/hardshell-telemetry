@@ -9,9 +9,9 @@ query. Set HARDSHELL_API_KEY and HARDSHELL_BASE_URL first:
 
 import os
 
-from hardshell_telemetry import Chunk, Document, DocumentLink, TelemetryClient
+from hardshell_telemetry import Chunk, Document, DocumentLink, HardshellClient
 
-client = TelemetryClient(
+client = HardshellClient(
     api_key=os.environ["HARDSHELL_API_KEY"],
     base_url=os.environ["HARDSHELL_BASE_URL"],
 )

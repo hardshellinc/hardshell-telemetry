@@ -4,9 +4,9 @@ This is the thin transport layer: authentication plus well-typed methods
 that mirror the public endpoints one-to-one. It has no dependencies beyond
 the Python standard library.
 
-    from hardshell_telemetry import TelemetryClient
+    from hardshell_telemetry import HardshellClient
 
-    client = TelemetryClient(
+    client = HardshellClient(
         api_key="hs-...",
         base_url="https://<your-hardshell-endpoint>",
     )
@@ -47,7 +47,7 @@ from hardshell_telemetry.types import (
     iso_timestamp,
 )
 
-__all__ = ["TelemetryClient"]
+__all__ = ["HardshellClient"]
 
 
 def _payload_of(item: Any) -> dict[str, Any]:
@@ -57,7 +57,7 @@ def _payload_of(item: Any) -> dict[str, Any]:
     return dict(item)
 
 
-class TelemetryClient:
+class HardshellClient:
     """Client for sending telemetry to Hardshell and reading reports back.
 
     Args:

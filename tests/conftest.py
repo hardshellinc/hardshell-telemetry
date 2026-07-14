@@ -94,6 +94,6 @@ def edge() -> Iterator[FakeEdge]:
 
 @pytest.fixture
 def client(edge: FakeEdge):
-    from hardshell_telemetry import TelemetryClient
+    from hardshell_telemetry import HardshellClient
 
-    return TelemetryClient(api_key="test-key", base_url=edge.base_url)
+    return HardshellClient(api_key="test-key", base_url=edge.base_url)

@@ -22,7 +22,7 @@ live endpoint, so don't run them in CI or tests).
 
 ## Layout
 
-- `src/hardshell_telemetry/client.py` — `TelemetryClient`: transport, auth,
+- `src/hardshell_telemetry/client.py` — `HardshellClient`: transport, auth,
   one method per public endpoint.
 - `src/hardshell_telemetry/types.py` — dataclasses mirroring the REST
   contract; inputs implement `to_payload()`, outputs `from_payload()`.

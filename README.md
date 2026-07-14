@@ -30,9 +30,9 @@ The interactive API reference lives at `<your-endpoint>/docs`.
 ## Quickstart
 
 ```python
-from hardshell_telemetry import TelemetryClient
+from hardshell_telemetry import HardshellClient
 
-client = TelemetryClient(
+client = HardshellClient(
     api_key="hs-...",                            # from your Hardshell onboarding
     base_url="https://<your-hardshell-endpoint>",  # ditto
     source="production",                         # optional provenance label

@@ -10,9 +10,9 @@ from hardshell_telemetry import (
     Chunk,
     Document,
     DocumentLink,
+    HardshellClient,
     RetrievalSpan,
     RetrievedChunk,
-    TelemetryClient,
     TelemetryError,
 )
 
@@ -20,14 +20,14 @@ from hardshell_telemetry import (
 class TestConstruction:
     def test_api_key_required(self):
         with pytest.raises(ValueError, match="api_key"):
-            TelemetryClient(api_key="", base_url="http://example.invalid")
+            HardshellClient(api_key="", base_url="http://example.invalid")
 
     def test_base_url_required(self):
         with pytest.raises(ValueError, match="base_url"):
-            TelemetryClient(api_key="k", base_url="")
+            HardshellClient(api_key="k", base_url="")
 
     def test_trailing_slash_normalized(self, edge):
-        client = TelemetryClient(api_key="k", base_url=edge.base_url + "/")
+        client = HardshellClient(api_key="k", base_url=edge.base_url + "/")
         client.ingest_documents([])
         assert edge.last.path == "/v1/documents"
 
@@ -68,12 +68,12 @@ class TestIngestDocuments:
         assert edge.last.json["documents"] == [{"document_id": "doc-1", "anything": {"goes": True}}]
 
     def test_call_source_overrides_client_source(self, edge):
-        client = TelemetryClient(api_key="k", base_url=edge.base_url, source="production")
+        client = HardshellClient(api_key="k", base_url=edge.base_url, source="production")
         client.ingest_documents([], source="backfill")
         assert edge.last.json["source"] == "backfill"
 
     def test_client_source_is_default(self, edge):
-        client = TelemetryClient(api_key="k", base_url=edge.base_url, source="production")
+        client = HardshellClient(api_key="k", base_url=edge.base_url, source="production")
         client.ingest_documents([])
         assert edge.last.json["source"] == "production"
 
@@ -138,7 +138,7 @@ class TestSpans:
         assert len(edge.last.json["spans"]) == 2
 
     def test_empty_span_source_inherits_client_source(self, edge):
-        client = TelemetryClient(api_key="k", base_url=edge.base_url, source="production")
+        client = HardshellClient(api_key="k", base_url=edge.base_url, source="production")
         raw_span = {"backend": "pgvector", "timestamp": "2026-07-13T00:00:00+00:00"}
         client.ingest_spans([RetrievalSpan(chunks=["c-1"]), raw_span])
         first, second = edge.last.json["spans"]
@@ -146,7 +146,7 @@ class TestSpans:
         assert second["source"] == "production"
 
     def test_span_level_source_wins_over_client_source(self, edge):
-        client = TelemetryClient(api_key="k", base_url=edge.base_url, source="production")
+        client = HardshellClient(api_key="k", base_url=edge.base_url, source="production")
         client.ingest_spans([RetrievalSpan(source="evaluation")])
         assert edge.last.json["spans"][0]["source"] == "evaluation"
 
@@ -211,7 +211,7 @@ class TestErrors:
         assert excinfo.value.status_code == 422
 
     def test_connection_failure_raises_telemetry_error(self):
-        client = TelemetryClient(api_key="k", base_url="http://127.0.0.1:9", timeout=0.5)
+        client = HardshellClient(api_key="k", base_url="http://127.0.0.1:9", timeout=0.5)
         with pytest.raises(TelemetryError) as excinfo:
             client.ingest_documents([])
         assert excinfo.value.status_code is None

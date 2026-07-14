@@ -9,9 +9,9 @@ Set HARDSHELL_API_KEY and HARDSHELL_BASE_URL first:
 import os
 from datetime import UTC, datetime, timedelta
 
-from hardshell_telemetry import TelemetryClient
+from hardshell_telemetry import HardshellClient
 
-client = TelemetryClient(
+client = HardshellClient(
     api_key=os.environ["HARDSHELL_API_KEY"],
     base_url=os.environ["HARDSHELL_BASE_URL"],
 )

@@ -11,9 +11,9 @@ HARDSHELL_BASE_URL first:
 import logging
 import os
 
-from hardshell_telemetry import TelemetryClient
+from hardshell_telemetry import HardshellClient
 
-client = TelemetryClient(
+client = HardshellClient(
     api_key=os.environ["HARDSHELL_API_KEY"],
     base_url=os.environ["HARDSHELL_BASE_URL"],
     source="production",  # provenance label stamped on everything this client sends
