@@ -5,8 +5,9 @@ These dataclasses mirror the public REST contract one-to-one — see the
 Every ingest method also accepts plain ``dict`` payloads, which are sent
 verbatim; the types are here to help, not to get in the way.
 
-Optional fields left as ``None`` are omitted from the request entirely, so
-the server applies its own defaults.
+Optional fields left at their defaults (``None``, or empty strings/dicts on
+:class:`RetrievalSpan`) are omitted from the request entirely, so the server
+applies its own defaults.
 """
 
 from __future__ import annotations
@@ -51,8 +52,9 @@ class Document:
     """Source-document metadata for ``POST /v1/documents``.
 
     ``document_id`` is your id for the document — an id you choose, never its
-    contents. All other fields are optional context that makes reports and
-    detection richer:
+    contents. Ids are scoped at the organization level and must be unique to
+    your organization, but not globally unique. All other fields are optional
+    context that makes reports and detection richer:
 
     - ``name``: human-readable title or path, shown for convenience.
     - ``content_hash``: fingerprint of the contents (e.g. sha256 hex) so
@@ -75,6 +77,7 @@ class Document:
     simhash_hex: str | None = None
 
     def to_payload(self) -> dict[str, Any]:
+        """Serialize to the wire format, omitting fields left as ``None``."""
         return _without_none(
             {
                 "document_id": self.document_id,
@@ -100,6 +103,7 @@ class DocumentLink:
     link_metadata: dict[str, Any] | None = None
 
     def to_payload(self) -> dict[str, Any]:
+        """Serialize to the wire format, omitting fields left as ``None``."""
         return _without_none({"document_id": self.document_id, "link_metadata": self.link_metadata})
 
 
@@ -109,7 +113,8 @@ class Chunk:
 
     ``chunk_id`` is your id for the chunk — **the same id you report when the
     chunk is retrieved**. If the ids don't match, retrievals can't be joined
-    back to this metadata.
+    back to this metadata. Like document ids, chunk ids are scoped to your
+    organization.
 
     - ``sensitivity`` / ``sensitivity_level``: as on :class:`Document`.
     - ``pii_flags``: any PII indicators for the chunk (free-form JSON).
@@ -130,6 +135,7 @@ class Chunk:
     simhash_hex: str | None = None
 
     def to_payload(self) -> dict[str, Any]:
+        """Serialize to the wire format, omitting fields left as ``None``."""
         payload = _without_none(
             {
                 "chunk_id": self.chunk_id,
@@ -161,25 +167,30 @@ class RetrievedChunk:
     score: float = 0.0
 
     def to_payload(self) -> dict[str, Any]:
+        """Serialize to the wire format."""
         return {"chunk_id": self.chunk_id, "score": float(self.score)}
 
 
 # A retrieved chunk in any convenient shape: a RetrievedChunk, a
-# (chunk_id, score) tuple, a {"chunk_id": ..., "score": ...} dict, or a bare
-# chunk-id string (score defaults to 0.0).
+# (chunk_id, score) tuple, a pre-built dict (sent verbatim), or a bare
+# chunk-id string (score defaults to 0.0 server-side).
 RetrievedChunkLike = RetrievedChunk | tuple[str, float] | dict[str, Any] | str
 
 
 def retrieved_chunk_payload(chunk: RetrievedChunkLike) -> dict[str, Any]:
-    """Normalize any :data:`RetrievedChunkLike` into the wire format."""
+    """Normalize any :data:`RetrievedChunkLike` into the wire format.
+
+    Typed and tuple/string forms serialize through :class:`RetrievedChunk`;
+    dicts pass through verbatim so the server sees exactly what you built.
+    """
     if isinstance(chunk, RetrievedChunk):
         return chunk.to_payload()
     if isinstance(chunk, str):
-        return {"chunk_id": chunk, "score": 0.0}
+        return {"chunk_id": chunk}
     if isinstance(chunk, dict):
-        return {"chunk_id": chunk["chunk_id"], "score": float(chunk.get("score", 0.0))}
+        return dict(chunk)
     chunk_id, score = chunk
-    return {"chunk_id": chunk_id, "score": float(score)}
+    return RetrievedChunk(chunk_id, score).to_payload()
 
 
 @dataclass
@@ -188,14 +199,18 @@ class RetrievalSpan:
 
     - ``chunks``: the chunks this search returned.
     - ``backend``: which vector store served it, e.g. ``"chroma"``.
-    - ``timestamp``: when the search happened; defaults to now (UTC) at send
-      time when left as ``None``.
+    - ``timestamp``: when the search happened; captured as now (UTC) at
+      construction time when left as ``None``, so spans built at query time
+      and flushed later keep the event time.
     - ``user_id`` / ``session_id`` / ``ip``: the end user behind the request,
       if known — this is what per-identity detection keys on.
     - ``trace_id`` / ``span_id``: your own correlation ids, if you have them.
     - ``attributes``: any extra tags to attach (free-form JSON, searchable).
     - ``source``: where this traffic came from, e.g. ``"production"``;
       defaults to the client's ``source`` when left empty.
+
+    Fields left empty are omitted from the wire payload (``backend`` and
+    ``timestamp`` are always sent — the API requires them).
     """
 
     chunks: Sequence[RetrievedChunkLike] = ()
@@ -209,19 +224,34 @@ class RetrievalSpan:
     attributes: dict[str, Any] = field(default_factory=dict)
     source: str = ""
 
+    def __post_init__(self) -> None:
+        if isinstance(self.chunks, str | bytes):
+            raise TypeError(
+                "chunks must be a sequence of chunk refs, not a single string — "
+                "wrap it in a list: chunks=[...]"
+            )
+        if self.timestamp is None:
+            self.timestamp = datetime.now(UTC)
+
     def to_payload(self) -> dict[str, Any]:
-        return {
+        """Serialize to the wire format, omitting fields left empty."""
+        payload: dict[str, Any] = {
             "backend": self.backend,
             "timestamp": iso_timestamp(self.timestamp or datetime.now(UTC)),
+            "chunks": [retrieved_chunk_payload(c) for c in self.chunks],
+        }
+        optional = {
             "user_id": self.user_id,
             "session_id": self.session_id,
             "ip": self.ip,
             "trace_id": self.trace_id,
             "span_id": self.span_id,
-            "chunks": [retrieved_chunk_payload(c) for c in self.chunks],
-            "attributes": dict(self.attributes),
             "source": self.source,
         }
+        payload.update({k: v for k, v in optional.items() if v})
+        if self.attributes:
+            payload["attributes"] = dict(self.attributes)
+        return payload
 
 
 # ── Ingest results ───────────────────────────────────────────────────────────
@@ -235,6 +265,7 @@ class IngestDocumentsResult:
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> IngestDocumentsResult:
+        """Parse the server response body."""
         return cls(documents_upserted=int(payload.get("documents_upserted", 0)))
 
 
@@ -247,6 +278,7 @@ class IngestChunksResult:
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> IngestChunksResult:
+        """Parse the server response body."""
         return cls(
             chunks_upserted=int(payload.get("chunks_upserted", 0)),
             links_upserted=int(payload.get("links_upserted", 0)),
@@ -262,6 +294,7 @@ class IngestSpansResult:
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> IngestSpansResult:
+        """Parse the server response body."""
         return cls(
             spans_accepted=int(payload.get("spans_accepted", 0)),
             chunks_logged=int(payload.get("chunks_logged", 0)),
@@ -280,6 +313,7 @@ class ChunkAccessCount:
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> ChunkAccessCount:
+        """Parse one chunk entry of the report response."""
         return cls(
             chunk_id=payload["chunk_id"],
             access_count=int(payload["access_count"]),
@@ -297,6 +331,7 @@ class DocumentAccessSummary:
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> DocumentAccessSummary:
+        """Parse one document entry of the report response."""
         return cls(
             document_id=payload["document_id"],
             name=payload.get("name", ""),
@@ -318,6 +353,7 @@ class DocumentAccessReport:
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> DocumentAccessReport:
+        """Parse the report response body."""
         return cls(
             documents=tuple(
                 DocumentAccessSummary.from_payload(d) for d in payload.get("documents", [])

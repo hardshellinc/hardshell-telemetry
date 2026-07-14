@@ -47,7 +47,8 @@ client.record_retrieval(
 ```
 
 Your organization is derived from the API key server-side — you never send a
-tenant or org id.
+tenant or org id. The client never follows redirects, so `base_url` must be
+your final Hardshell endpoint.
 
 ### Make it non-fatal in production
 
@@ -60,6 +61,21 @@ try:
     client.record_retrieval(...)
 except Exception:
     logging.warning("hardshell telemetry failed (non-fatal)", exc_info=True)
+```
+
+### Batching spans
+
+If you'd rather not send per query, build `RetrievalSpan` objects as
+retrievals happen and flush them in one call. Each span's timestamp is
+captured when the span is constructed, so batched events keep their real
+event times:
+
+```python
+from hardshell_telemetry import RetrievalSpan
+
+pending.append(RetrievalSpan(chunks=[("c-1", 0.91)], backend="chroma", user_id="u-1"))
+# ... later, from your flush loop:
+client.ingest_spans(pending)
 ```
 
 ## Registering your corpus

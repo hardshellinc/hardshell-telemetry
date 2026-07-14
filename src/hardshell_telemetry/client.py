@@ -19,13 +19,17 @@ the Python standard library.
     )
 
 Your organization is derived from the API key server-side — you never send a
-tenant or org id. Failed requests raise :class:`TelemetryError` by default so
-setup problems are visible; see that class for the non-fatal production
-pattern.
+tenant or org id. Every failure raises :class:`TelemetryError` — transport
+errors, timeouts, non-2xx responses, and non-JSON bodies — so setup problems
+are visible; see that class for the non-fatal production pattern. Redirects
+are never followed (``base_url`` must be the final endpoint): following one
+would replay the request elsewhere and expose the API key to the redirect
+target.
 """
 
 from __future__ import annotations
 
+import http.client
 import json
 import urllib.error
 import urllib.parse
@@ -34,6 +38,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 
+from hardshell_telemetry._version import __version__
 from hardshell_telemetry.exceptions import TelemetryError
 from hardshell_telemetry.types import (
     Chunk,
@@ -48,6 +53,17 @@ from hardshell_telemetry.types import (
 )
 
 __all__ = ["HardshellClient"]
+
+
+class _NoRedirects(urllib.request.HTTPRedirectHandler):
+    """Refuse redirects: urllib would convert POST to a body-less GET and
+    re-send the Authorization header to the redirect target."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirects())
 
 
 def _payload_of(item: Any) -> dict[str, Any]:
@@ -66,9 +82,10 @@ class HardshellClient:
         base_url: Your Hardshell endpoint, e.g. from your onboarding. The
             interactive API reference lives at ``<base_url>/docs``.
         timeout: Per-request timeout in seconds.
-        source: Default provenance label stamped on everything this client
-            sends when a call doesn't set its own — e.g. ``"production"``,
-            ``"staging"``, ``"evaluation"``. Empty means unlabeled.
+        source: Default provenance label stamped on typed payloads this
+            client sends when a call doesn't set its own — e.g.
+            ``"production"``, ``"staging"``, ``"evaluation"``. Empty means
+            unlabeled. Raw dict spans are never modified.
     """
 
     def __init__(
@@ -80,13 +97,17 @@ class HardshellClient:
         source: str = "",
     ) -> None:
         if not api_key:
-            raise ValueError("api_key is required")
+            raise ValueError("Hardshell api_key is required")
         if not base_url:
-            raise ValueError("base_url is required (your Hardshell endpoint)")
-        self._api_key = api_key
+            raise ValueError("Hardshell base_url is required (your Hardshell endpoint)")
         self._base = base_url.rstrip("/")
         self._timeout = timeout
         self._source = source
+        self._headers = {
+            "Authorization": "Bearer " + api_key,
+            "Content-Type": "application/json",
+            "User-Agent": f"hardshell-telemetry/{__version__}",
+        }
 
     # ── Enrichment data plane (index-build time) ────────────────────────────
     # Register documents and chunks once per corpus build (or when they
@@ -100,11 +121,9 @@ class HardshellClient:
         source: str = "",
     ) -> IngestDocumentsResult:
         """Upsert source-document metadata (``POST /v1/documents``)."""
-        payload = {
-            "documents": [_payload_of(d) for d in documents],
-            "source": source or self._source,
-        }
-        return IngestDocumentsResult.from_payload(self._post("/v1/documents", payload))
+        return IngestDocumentsResult.from_payload(
+            self._post_batch("/v1/documents", "documents", documents, source)
+        )
 
     def ingest_chunks(
         self,
@@ -113,11 +132,9 @@ class HardshellClient:
         source: str = "",
     ) -> IngestChunksResult:
         """Upsert per-chunk metadata (``POST /v1/chunks``)."""
-        payload = {
-            "chunks": [_payload_of(c) for c in chunks],
-            "source": source or self._source,
-        }
-        return IngestChunksResult.from_payload(self._post("/v1/chunks", payload))
+        return IngestChunksResult.from_payload(
+            self._post_batch("/v1/chunks", "chunks", chunks, source)
+        )
 
     # ── Retrieval data plane (query time) ───────────────────────────────────
 
@@ -161,13 +178,18 @@ class HardshellClient:
     ) -> IngestSpansResult:
         """Send one or more retrieval spans (``POST /v1/spans``).
 
-        Spans with an empty ``source`` inherit the client's default source.
+        Typed spans with an empty ``source`` inherit the client's default
+        source. Raw dict spans are sent verbatim — never modified — so the
+        server can apply its own defaults to them.
         """
         serialized = []
         for span in spans:
-            payload = _payload_of(span)
-            if not payload.get("source") and self._source:
-                payload["source"] = self._source
+            if isinstance(span, RetrievalSpan):
+                payload = span.to_payload()
+                if not span.source and self._source:
+                    payload["source"] = self._source
+            else:
+                payload = dict(span)
             serialized.append(payload)
         return IngestSpansResult.from_payload(self._post("/v1/spans", {"spans": serialized}))
 
@@ -178,8 +200,8 @@ class HardshellClient:
         *,
         window_start: datetime | str | None = None,
         window_end: datetime | str | None = None,
-        limit: int = 0,
-        offset: int = 0,
+        limit: int | None = None,
+        offset: int | None = None,
     ) -> DocumentAccessReport:
         """How often your chunks are retrieved, grouped by document
         (``GET /v1/reports/document-access``).
@@ -187,7 +209,7 @@ class HardshellClient:
         Args:
             window_start: Only count retrievals at or after this time.
             window_end: Only count retrievals before this time.
-            limit: Page size; 0 means the server default.
+            limit: Page size; ``None`` means the server default.
             offset: Page offset for walking large corpora.
         """
         params: dict[str, str] = {}
@@ -195,13 +217,23 @@ class HardshellClient:
             params["window_start"] = _time_param(window_start)
         if window_end is not None:
             params["window_end"] = _time_param(window_end)
-        if limit:
+        if limit is not None:
             params["limit"] = str(limit)
-        if offset:
+        if offset is not None:
             params["offset"] = str(offset)
         return DocumentAccessReport.from_payload(self._get("/v1/reports/document-access", params))
 
     # ── Transport ────────────────────────────────────────────────────────────
+
+    def _post_batch(
+        self,
+        path: str,
+        key: str,
+        items: Sequence[Any],
+        source: str,
+    ) -> dict[str, Any]:
+        payload = {key: [_payload_of(i) for i in items], "source": source or self._source}
+        return self._post(path, payload)
 
     def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         body = json.dumps(payload).encode("utf-8")
@@ -213,30 +245,50 @@ class HardshellClient:
         return self._request("GET", path)
 
     def _request(self, method: str, path: str, body: bytes | None = None) -> dict[str, Any]:
-        from hardshell_telemetry import __version__
-
         request = urllib.request.Request(
             self._base + path,
             data=body,
             method=method,
-            headers={
-                "Authorization": "Bearer " + self._api_key,
-                "Content-Type": "application/json",
-                "User-Agent": f"hardshell-telemetry/{__version__}",
-            },
+            headers=self._headers,
         )
         try:
-            with urllib.request.urlopen(request, timeout=self._timeout) as response:
-                return json.loads(response.read().decode("utf-8"))
+            with _OPENER.open(request, timeout=self._timeout) as response:
+                status = response.status
+                raw = response.read()
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "replace")
             raise TelemetryError(
-                f"hardshell request failed: HTTP {exc.code} {detail}",
+                f"hardshell {method} {path} failed: HTTP {exc.code} {detail}",
                 status_code=exc.code,
                 detail=detail,
+                method=method,
+                path=path,
             ) from exc
         except urllib.error.URLError as exc:
-            raise TelemetryError(f"hardshell request failed: {exc.reason}") from exc
+            raise TelemetryError(
+                f"hardshell {method} {path} failed: {exc.reason}",
+                method=method,
+                path=path,
+            ) from exc
+        except (TimeoutError, OSError, http.client.HTTPException) as exc:
+            # urllib only wraps connect-phase failures in URLError; timeouts
+            # or resets while reading the response arrive raw.
+            raise TelemetryError(
+                f"hardshell {method} {path} failed: {exc}",
+                method=method,
+                path=path,
+            ) from exc
+        try:
+            return json.loads(raw.decode("utf-8"))
+        except ValueError as exc:
+            raise TelemetryError(
+                f"hardshell {method} {path} returned a non-JSON response "
+                "(is base_url pointing at your Hardshell endpoint?)",
+                status_code=status,
+                detail=raw[:200].decode("utf-8", "replace"),
+                method=method,
+                path=path,
+            ) from exc
 
 
 def _time_param(value: datetime | str) -> str:

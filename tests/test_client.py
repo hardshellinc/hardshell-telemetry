@@ -137,13 +137,23 @@ class TestSpans:
         client.ingest_spans([RetrievalSpan(chunks=["c-1"]), RetrievalSpan(chunks=["c-2"])])
         assert len(edge.last.json["spans"]) == 2
 
-    def test_empty_span_source_inherits_client_source(self, edge):
+    def test_typed_span_with_empty_source_inherits_client_source(self, edge):
+        client = HardshellClient(api_key="k", base_url=edge.base_url, source="production")
+        client.ingest_spans([RetrievalSpan(chunks=["c-1"])])
+        assert edge.last.json["spans"][0]["source"] == "production"
+
+    def test_raw_dict_spans_sent_verbatim_never_modified(self, edge):
         client = HardshellClient(api_key="k", base_url=edge.base_url, source="production")
         raw_span = {"backend": "pgvector", "timestamp": "2026-07-13T00:00:00+00:00"}
-        client.ingest_spans([RetrievalSpan(chunks=["c-1"]), raw_span])
-        first, second = edge.last.json["spans"]
-        assert first["source"] == "production"
-        assert second["source"] == "production"
+        client.ingest_spans([raw_span])
+        assert edge.last.json["spans"] == [
+            {"backend": "pgvector", "timestamp": "2026-07-13T00:00:00+00:00"}
+        ]
+        assert "source" not in raw_span  # caller's dict untouched too
+
+    def test_string_chunks_container_rejected(self, client):
+        with pytest.raises(TypeError, match="wrap it in a list"):
+            client.record_retrieval(chunks="doc-42:chunk-3")
 
     def test_span_level_source_wins_over_client_source(self, edge):
         client = HardshellClient(api_key="k", base_url=edge.base_url, source="production")
@@ -157,6 +167,10 @@ class TestDocumentAccessReport:
         assert edge.last.method == "GET"
         assert edge.last.path == "/v1/reports/document-access"
         assert edge.last.query == {}
+
+    def test_limit_zero_is_sent_not_dropped(self, edge, client):
+        client.document_access_report(limit=0)
+        assert edge.last.query == {"limit": ["0"]}
 
     def test_window_and_paging_params(self, edge, client):
         client.document_access_report(
@@ -215,3 +229,51 @@ class TestErrors:
         with pytest.raises(TelemetryError) as excinfo:
             client.ingest_documents([])
         assert excinfo.value.status_code is None
+
+    def test_read_timeout_raises_telemetry_error(self, edge):
+        # Server accepts the connection but stalls past the client timeout;
+        # urllib surfaces this as a raw TimeoutError, not URLError.
+        edge.respond("POST", "/v1/documents", delay=1.0)
+        client = HardshellClient(api_key="k", base_url=edge.base_url, timeout=0.2)
+        with pytest.raises(TelemetryError):
+            client.ingest_documents([])
+
+    def test_non_json_success_body_raises_telemetry_error(self, edge, client):
+        edge.respond(
+            "POST",
+            "/v1/documents",
+            raw_body=b"<html>corporate proxy sign-in</html>",
+            content_type="text/html",
+        )
+        with pytest.raises(TelemetryError) as excinfo:
+            client.ingest_documents([])
+        assert excinfo.value.status_code == 200
+        assert "corporate proxy" in (excinfo.value.detail or "")
+
+    def test_redirects_refused_not_followed(self, make_edge, client, edge):
+        # Following a redirect would replay the POST as a body-less GET and
+        # re-send the bearer token to the redirect target.
+        other = make_edge()
+        edge.respond(
+            "POST", "/v1/spans", status=302, headers={"Location": other.base_url + "/elsewhere"}
+        )
+        with pytest.raises(TelemetryError) as excinfo:
+            client.record_retrieval(chunks=[("c-1", 0.5)])
+        assert excinfo.value.status_code == 302
+        assert other.requests == []  # nothing leaked to the redirect target
+
+    def test_error_carries_method_and_path(self, edge, client):
+        edge.respond("GET", "/v1/reports/document-access", status=500, body={"detail": "boom"})
+        with pytest.raises(TelemetryError) as excinfo:
+            client.document_access_report()
+        assert excinfo.value.method == "GET"
+        assert excinfo.value.path == "/v1/reports/document-access"
+
+
+class TestFakeEdgeIsolation:
+    def test_two_edges_record_independently(self, make_edge):
+        first, second = make_edge(), make_edge()
+        HardshellClient(api_key="k", base_url=first.base_url).ingest_documents([])
+        HardshellClient(api_key="k", base_url=second.base_url).ingest_chunks([])
+        assert [r.path for r in first.requests] == ["/v1/documents"]
+        assert [r.path for r in second.requests] == ["/v1/chunks"]

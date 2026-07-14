@@ -1,5 +1,6 @@
 """Official Hardshell client for sending AI/RAG telemetry and reading derived reports."""
 
+from hardshell_telemetry._version import __version__
 from hardshell_telemetry.client import HardshellClient
 from hardshell_telemetry.exceptions import TelemetryError
 from hardshell_telemetry.types import (
@@ -15,8 +16,6 @@ from hardshell_telemetry.types import (
     RetrievalSpan,
     RetrievedChunk,
 )
-
-__version__ = "0.0.0"
 
 __all__ = [
     "Chunk",

@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import json
 import threading
-from collections.abc import Iterator
+import time
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -27,13 +28,29 @@ class RecordedRequest:
 
 
 @dataclass
+class _Response:
+    status: int = 200
+    body: Any = None
+    raw_body: bytes | None = None
+    content_type: str = "application/json"
+    headers: dict[str, str] = field(default_factory=dict)
+    delay: float = 0.0
+
+    def encoded(self) -> bytes:
+        if self.raw_body is not None:
+            return self.raw_body
+        return json.dumps({} if self.body is None else self.body).encode("utf-8")
+
+
+@dataclass
 class FakeEdge:
-    server: ThreadingHTTPServer
+    server: ThreadingHTTPServer | None = None
     requests: list[RecordedRequest] = field(default_factory=list)
-    responses: dict[tuple[str, str], tuple[int, Any]] = field(default_factory=dict)
+    responses: dict[tuple[str, str], _Response] = field(default_factory=dict)
 
     @property
     def base_url(self) -> str:
+        assert self.server is not None
         host, port = self.server.server_address[:2]
         return f"http://{host}:{port}"
 
@@ -41,13 +58,38 @@ class FakeEdge:
     def last(self) -> RecordedRequest:
         return self.requests[-1]
 
-    def respond(self, method: str, path: str, *, status: int = 200, body: Any = None) -> None:
-        """Set the response for (method, path); default is 200 {}."""
-        self.responses[(method, path)] = (status, {} if body is None else body)
+    def respond(
+        self,
+        method: str,
+        path: str,
+        *,
+        status: int = 200,
+        body: Any = None,
+        raw_body: bytes | None = None,
+        content_type: str = "application/json",
+        headers: dict[str, str] | None = None,
+        delay: float = 0.0,
+    ) -> None:
+        """Set the response for (method, path); default is 200 {}.
+
+        ``raw_body`` overrides ``body`` with non-JSON bytes; ``delay`` makes
+        the handler stall before responding (for timeout tests).
+        """
+        self.responses[(method, path)] = _Response(
+            status=status,
+            body=body,
+            raw_body=raw_body,
+            content_type=content_type,
+            headers=headers or {},
+            delay=delay,
+        )
 
 
 class _Handler(BaseHTTPRequestHandler):
-    edge: FakeEdge  # set by the fixture
+    # Each FakeEdge gets its own _Handler subclass with `edge` bound to it,
+    # so concurrent servers and lingering handler threads can't record into
+    # another test's edge.
+    edge: FakeEdge
 
     def _handle(self, method: str) -> None:
         split = urlsplit(self.path)
@@ -62,11 +104,15 @@ class _Handler(BaseHTTPRequestHandler):
                 json=json.loads(raw) if raw else None,
             )
         )
-        status, body = self.edge.responses.get((method, split.path), (200, {}))
-        encoded = json.dumps(body).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
+        response = self.edge.responses.get((method, split.path), _Response())
+        if response.delay:
+            time.sleep(response.delay)
+        encoded = response.encoded()
+        self.send_response(response.status)
+        self.send_header("Content-Type", response.content_type)
         self.send_header("Content-Length", str(len(encoded)))
+        for name, value in response.headers.items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(encoded)
 
@@ -81,15 +127,29 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 @pytest.fixture
-def edge() -> Iterator[FakeEdge]:
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
-    fake = FakeEdge(server=server)
-    _Handler.edge = fake
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    yield fake
-    server.shutdown()
-    server.server_close()
+def make_edge() -> Iterator[Callable[[], FakeEdge]]:
+    """Factory for independent fake edges; each gets its own server and
+    handler class, so several can safely run at once."""
+    servers: list[ThreadingHTTPServer] = []
+
+    def factory() -> FakeEdge:
+        fake = FakeEdge()
+        handler = type("_BoundHandler", (_Handler,), {"edge": fake})
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        fake.server = server
+        servers.append(server)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        return fake
+
+    yield factory
+    for server in servers:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.fixture
+def edge(make_edge: Callable[[], FakeEdge]) -> FakeEdge:
+    return make_edge()
 
 
 @pytest.fixture

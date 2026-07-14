@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import time
 from datetime import UTC, datetime
+
+import pytest
 
 from hardshell_telemetry import (
     Chunk,
@@ -88,11 +91,18 @@ class TestRetrievedChunks:
     def test_tuple_form(self):
         assert retrieved_chunk_payload(("c-1", 0.5)) == {"chunk_id": "c-1", "score": 0.5}
 
-    def test_bare_string_form_defaults_score(self):
-        assert retrieved_chunk_payload("c-1") == {"chunk_id": "c-1", "score": 0.0}
+    def test_bare_string_form_omits_score(self):
+        assert retrieved_chunk_payload("c-1") == {"chunk_id": "c-1"}
 
-    def test_dict_form_defaults_missing_score(self):
-        assert retrieved_chunk_payload({"chunk_id": "c-1"}) == {"chunk_id": "c-1", "score": 0.0}
+    def test_dict_form_passes_through_verbatim(self):
+        chunk = {"chunk_id": "c-1", "score": None, "rank": 3}
+        assert retrieved_chunk_payload(chunk) == {"chunk_id": "c-1", "score": None, "rank": 3}
+
+    def test_dict_form_is_copied_not_aliased(self):
+        chunk = {"chunk_id": "c-1"}
+        payload = retrieved_chunk_payload(chunk)
+        payload["mutated"] = True
+        assert "mutated" not in chunk
 
     def test_score_coerced_to_float(self):
         assert retrieved_chunk_payload(("c-1", 1)) == {"chunk_id": "c-1", "score": 1.0}
@@ -104,7 +114,7 @@ class TestRetrievalSpan:
         payload = RetrievalSpan(chunks=["c-1"], backend="chroma", timestamp=ts).to_payload()
         assert payload["timestamp"] == "2026-07-13T12:00:00+00:00"
         assert payload["backend"] == "chroma"
-        assert payload["chunks"] == [{"chunk_id": "c-1", "score": 0.0}]
+        assert payload["chunks"] == [{"chunk_id": "c-1"}]
 
     def test_missing_timestamp_defaults_to_now_utc(self):
         payload = RetrievalSpan().to_payload()
@@ -132,6 +142,20 @@ class TestRetrievalSpan:
         assert payload["span_id"] == "sp-1"
         assert payload["attributes"] == {"route": "/search"}
         assert payload["source"] == "staging"
+
+    def test_empty_optional_fields_omitted_from_wire(self):
+        payload = RetrievalSpan(chunks=["c-1"], backend="chroma").to_payload()
+        assert set(payload) == {"backend", "timestamp", "chunks"}
+
+    def test_timestamp_captured_at_construction_not_send_time(self):
+        span = RetrievalSpan(chunks=["c-1"])
+        first = span.to_payload()["timestamp"]
+        time.sleep(0.02)
+        assert span.to_payload()["timestamp"] == first
+
+    def test_string_chunks_container_rejected(self):
+        with pytest.raises(TypeError, match="wrap it in a list"):
+            RetrievalSpan(chunks="doc-42:chunk-3")
 
 
 class TestResultParsing:
