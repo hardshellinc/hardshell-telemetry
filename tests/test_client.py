@@ -65,9 +65,7 @@ class TestIngestDocuments:
 
     def test_dicts_pass_through_verbatim(self, edge, client):
         client.ingest_documents([{"document_id": "doc-1", "anything": {"goes": True}}])
-        assert edge.last.json["documents"] == [
-            {"document_id": "doc-1", "anything": {"goes": True}}
-        ]
+        assert edge.last.json["documents"] == [{"document_id": "doc-1", "anything": {"goes": True}}]
 
     def test_call_source_overrides_client_source(self, edge):
         client = TelemetryClient(api_key="k", base_url=edge.base_url, source="production")
@@ -213,9 +211,7 @@ class TestErrors:
         assert excinfo.value.status_code == 422
 
     def test_connection_failure_raises_telemetry_error(self):
-        client = TelemetryClient(
-            api_key="k", base_url="http://127.0.0.1:9", timeout=0.5
-        )
+        client = TelemetryClient(api_key="k", base_url="http://127.0.0.1:9", timeout=0.5)
         with pytest.raises(TelemetryError) as excinfo:
             client.ingest_documents([])
         assert excinfo.value.status_code is None

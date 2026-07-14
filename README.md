@@ -124,7 +124,8 @@ retrieval recording, and report reading. Each takes `HARDSHELL_API_KEY` and
 ```sh
 uv sync          # install with dev dependencies
 uv run pytest    # tests run against a local fake server; no network
-uv run ruff check .
+uv run ruff check . && uv run ruff format --check .
+uv run ty check  # type-check
 uv build         # wheel + sdist
 ```
 

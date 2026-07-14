@@ -9,11 +9,13 @@ the base package must never gain runtime dependencies.
 uv sync              # install dev dependencies (pytest, ruff)
 uv run pytest        # full test suite; fast, no network beyond 127.0.0.1
 uv run ruff check .  # lint
-uv run ruff format --check .  # formatting (if in doubt, match existing style)
+uv run ruff format --check .  # formatting
+uv run ty check      # type-check
 uv build             # build wheel + sdist into dist/
 ```
 
-Run tests and lint before committing. There is no app to launch — this is a
+Run tests, lint, and the type check before committing — CI enforces all of
+them. There is no app to launch — this is a
 library; the closest thing to "running it" is the scripts in `examples/`
 (they need real `HARDSHELL_API_KEY` / `HARDSHELL_BASE_URL` env vars and hit a
 live endpoint, so don't run them in CI or tests).

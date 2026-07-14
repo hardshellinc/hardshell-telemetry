@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import threading
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -75,12 +76,12 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         self._handle("POST")
 
-    def log_message(self, *args: Any) -> None:  # keep test output quiet
+    def log_message(self, format: str, *args: Any) -> None:  # keep test output quiet
         pass
 
 
 @pytest.fixture
-def edge() -> FakeEdge:
+def edge() -> Iterator[FakeEdge]:
     server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
     fake = FakeEdge(server=server)
     _Handler.edge = fake

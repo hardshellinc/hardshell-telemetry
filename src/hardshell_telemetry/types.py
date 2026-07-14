@@ -100,9 +100,7 @@ class DocumentLink:
     link_metadata: dict[str, Any] | None = None
 
     def to_payload(self) -> dict[str, Any]:
-        return _without_none(
-            {"document_id": self.document_id, "link_metadata": self.link_metadata}
-        )
+        return _without_none({"document_id": self.document_id, "link_metadata": self.link_metadata})
 
 
 @dataclass
@@ -303,9 +301,7 @@ class DocumentAccessSummary:
             document_id=payload["document_id"],
             name=payload.get("name", ""),
             chunk_count=int(payload["chunk_count"]),
-            chunks=tuple(
-                ChunkAccessCount.from_payload(c) for c in payload.get("chunks", [])
-            ),
+            chunks=tuple(ChunkAccessCount.from_payload(c) for c in payload.get("chunks", [])),
         )
 
 
@@ -324,8 +320,7 @@ class DocumentAccessReport:
     def from_payload(cls, payload: dict[str, Any]) -> DocumentAccessReport:
         return cls(
             documents=tuple(
-                DocumentAccessSummary.from_payload(d)
-                for d in payload.get("documents", [])
+                DocumentAccessSummary.from_payload(d) for d in payload.get("documents", [])
             ),
             total_documents=int(payload.get("total_documents", 0)),
         )

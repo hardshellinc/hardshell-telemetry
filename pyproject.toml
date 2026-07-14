@@ -23,7 +23,11 @@ Homepage = "https://hardshell.ai"
 Source = "https://github.com/hardshellinc/hardshell-telemetry"
 
 [dependency-groups]
-dev = ["pytest>=8.0", "ruff>=0.8"]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.8",
+    "ty>=0.0.59",
+]
 
 [tool.ruff]
 line-length = 100

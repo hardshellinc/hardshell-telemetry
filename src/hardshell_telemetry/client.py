@@ -169,9 +169,7 @@ class TelemetryClient:
             if not payload.get("source") and self._source:
                 payload["source"] = self._source
             serialized.append(payload)
-        return IngestSpansResult.from_payload(
-            self._post("/v1/spans", {"spans": serialized})
-        )
+        return IngestSpansResult.from_payload(self._post("/v1/spans", {"spans": serialized}))
 
     # ── Reports (read your own derived data back) ───────────────────────────
 
@@ -201,9 +199,7 @@ class TelemetryClient:
             params["limit"] = str(limit)
         if offset:
             params["offset"] = str(offset)
-        return DocumentAccessReport.from_payload(
-            self._get("/v1/reports/document-access", params)
-        )
+        return DocumentAccessReport.from_payload(self._get("/v1/reports/document-access", params))
 
     # ── Transport ────────────────────────────────────────────────────────────
 
