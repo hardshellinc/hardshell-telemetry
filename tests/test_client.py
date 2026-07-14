@@ -1,0 +1,221 @@
+"""End-to-end client behavior against the fake edge."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+
+import pytest
+
+from hardshell_telemetry import (
+    Chunk,
+    Document,
+    DocumentLink,
+    RetrievalSpan,
+    RetrievedChunk,
+    TelemetryClient,
+    TelemetryError,
+)
+
+
+class TestConstruction:
+    def test_api_key_required(self):
+        with pytest.raises(ValueError, match="api_key"):
+            TelemetryClient(api_key="", base_url="http://example.invalid")
+
+    def test_base_url_required(self):
+        with pytest.raises(ValueError, match="base_url"):
+            TelemetryClient(api_key="k", base_url="")
+
+    def test_trailing_slash_normalized(self, edge):
+        client = TelemetryClient(api_key="k", base_url=edge.base_url + "/")
+        client.ingest_documents([])
+        assert edge.last.path == "/v1/documents"
+
+
+class TestHeaders:
+    def test_bearer_auth_and_content_type(self, edge, client):
+        client.ingest_documents([])
+        assert edge.last.headers["Authorization"] == "Bearer test-key"
+        assert edge.last.headers["Content-Type"] == "application/json"
+
+    def test_user_agent_carries_package_version(self, edge, client):
+        from hardshell_telemetry import __version__
+
+        client.ingest_documents([])
+        assert edge.last.headers["User-Agent"] == f"hardshell-telemetry/{__version__}"
+
+
+class TestIngestDocuments:
+    def test_typed_documents_and_result(self, edge, client):
+        edge.respond("POST", "/v1/documents", body={"documents_upserted": 2})
+        result = client.ingest_documents(
+            [
+                Document(document_id="doc-1", name="handbook", sensitivity=0.2),
+                Document(document_id="doc-2"),
+            ]
+        )
+        assert result.documents_upserted == 2
+        assert edge.last.json == {
+            "documents": [
+                {"document_id": "doc-1", "name": "handbook", "sensitivity": 0.2},
+                {"document_id": "doc-2"},
+            ],
+            "source": "",
+        }
+
+    def test_dicts_pass_through_verbatim(self, edge, client):
+        client.ingest_documents([{"document_id": "doc-1", "anything": {"goes": True}}])
+        assert edge.last.json["documents"] == [
+            {"document_id": "doc-1", "anything": {"goes": True}}
+        ]
+
+    def test_call_source_overrides_client_source(self, edge):
+        client = TelemetryClient(api_key="k", base_url=edge.base_url, source="production")
+        client.ingest_documents([], source="backfill")
+        assert edge.last.json["source"] == "backfill"
+
+    def test_client_source_is_default(self, edge):
+        client = TelemetryClient(api_key="k", base_url=edge.base_url, source="production")
+        client.ingest_documents([])
+        assert edge.last.json["source"] == "production"
+
+
+class TestIngestChunks:
+    def test_chunks_with_links_and_result(self, edge, client):
+        edge.respond("POST", "/v1/chunks", body={"chunks_upserted": 1, "links_upserted": 1})
+        result = client.ingest_chunks(
+            [Chunk(chunk_id="c-1", document_links=[DocumentLink(document_id="doc-1")])]
+        )
+        assert (result.chunks_upserted, result.links_upserted) == (1, 1)
+        assert edge.last.path == "/v1/chunks"
+        assert edge.last.json["chunks"] == [
+            {"chunk_id": "c-1", "document_links": [{"document_id": "doc-1"}]}
+        ]
+
+
+class TestSpans:
+    def test_record_retrieval_common_case(self, edge, client):
+        edge.respond("POST", "/v1/spans", body={"spans_accepted": 1, "chunks_logged": 2})
+        result = client.record_retrieval(
+            chunks=[("c-1", 0.91), RetrievedChunk("c-2", 0.88)],
+            user_id="end-user-123",
+            backend="chroma",
+        )
+        assert result.spans_accepted == 1
+        (span,) = edge.last.json["spans"]
+        assert span["backend"] == "chroma"
+        assert span["user_id"] == "end-user-123"
+        assert span["chunks"] == [
+            {"chunk_id": "c-1", "score": 0.91},
+            {"chunk_id": "c-2", "score": 0.88},
+        ]
+        # timestamp filled in automatically, timezone-aware ISO 8601
+        assert datetime.fromisoformat(span["timestamp"]).tzinfo is not None
+
+    def test_record_retrieval_carries_actor_and_correlation_fields(self, edge, client):
+        ts = datetime(2026, 7, 13, 12, 0, tzinfo=UTC)
+        client.record_retrieval(
+            chunks=["c-1"],
+            backend="qdrant",
+            user_id="u-1",
+            session_id="s-1",
+            ip="10.0.0.9",
+            trace_id="t-1",
+            span_id="sp-1",
+            timestamp=ts,
+            attributes={"route": "/ask"},
+            source="staging",
+        )
+        (span,) = edge.last.json["spans"]
+        assert span["timestamp"] == "2026-07-13T12:00:00+00:00"
+        assert span["session_id"] == "s-1"
+        assert span["ip"] == "10.0.0.9"
+        assert span["trace_id"] == "t-1"
+        assert span["span_id"] == "sp-1"
+        assert span["attributes"] == {"route": "/ask"}
+        assert span["source"] == "staging"
+
+    def test_ingest_spans_batches_multiple(self, edge, client):
+        client.ingest_spans([RetrievalSpan(chunks=["c-1"]), RetrievalSpan(chunks=["c-2"])])
+        assert len(edge.last.json["spans"]) == 2
+
+    def test_empty_span_source_inherits_client_source(self, edge):
+        client = TelemetryClient(api_key="k", base_url=edge.base_url, source="production")
+        raw_span = {"backend": "pgvector", "timestamp": "2026-07-13T00:00:00+00:00"}
+        client.ingest_spans([RetrievalSpan(chunks=["c-1"]), raw_span])
+        first, second = edge.last.json["spans"]
+        assert first["source"] == "production"
+        assert second["source"] == "production"
+
+    def test_span_level_source_wins_over_client_source(self, edge):
+        client = TelemetryClient(api_key="k", base_url=edge.base_url, source="production")
+        client.ingest_spans([RetrievalSpan(source="evaluation")])
+        assert edge.last.json["spans"][0]["source"] == "evaluation"
+
+
+class TestDocumentAccessReport:
+    def test_no_args_sends_no_query_params(self, edge, client):
+        client.document_access_report()
+        assert edge.last.method == "GET"
+        assert edge.last.path == "/v1/reports/document-access"
+        assert edge.last.query == {}
+
+    def test_window_and_paging_params(self, edge, client):
+        client.document_access_report(
+            window_start=datetime(2026, 7, 1, tzinfo=UTC),
+            window_end="2026-07-13T00:00:00+00:00",
+            limit=50,
+            offset=100,
+        )
+        assert edge.last.query == {
+            "window_start": ["2026-07-01T00:00:00+00:00"],
+            "window_end": ["2026-07-13T00:00:00+00:00"],
+            "limit": ["50"],
+            "offset": ["100"],
+        }
+
+    def test_response_parsed_into_types(self, edge, client):
+        edge.respond(
+            "GET",
+            "/v1/reports/document-access",
+            body={
+                "documents": [
+                    {
+                        "document_id": "doc-1",
+                        "name": "handbook",
+                        "chunk_count": 1,
+                        "chunks": [{"chunk_id": "c-1", "access_count": 3}],
+                    }
+                ],
+                "total_documents": 1,
+            },
+        )
+        report = client.document_access_report()
+        assert report.total_documents == 1
+        assert report.documents[0].chunks[0].access_count == 3
+
+
+class TestErrors:
+    def test_http_error_carries_status_and_detail(self, edge, client):
+        edge.respond("POST", "/v1/spans", status=401, body={"detail": "invalid api key"})
+        with pytest.raises(TelemetryError) as excinfo:
+            client.record_retrieval(chunks=["c-1"])
+        assert excinfo.value.status_code == 401
+        assert "invalid api key" in (excinfo.value.detail or "")
+        assert "401" in str(excinfo.value)
+
+    def test_validation_error_surfaces_as_telemetry_error(self, edge, client):
+        edge.respond(
+            "POST", "/v1/documents", status=422, body={"detail": [{"msg": "field required"}]}
+        )
+        with pytest.raises(TelemetryError) as excinfo:
+            client.ingest_documents([{"wrong": "shape"}])
+        assert excinfo.value.status_code == 422
+
+    def test_connection_failure_raises_telemetry_error(self):
+        client = TelemetryClient(
+            api_key="k", base_url="http://127.0.0.1:9", timeout=0.5
+        )
+        with pytest.raises(TelemetryError) as excinfo:
+            client.ingest_documents([])
+        assert excinfo.value.status_code is None
