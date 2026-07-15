@@ -206,8 +206,11 @@ class RetrievalSpan:
       if known — this is what per-identity detection keys on.
     - ``trace_id`` / ``span_id``: your own correlation ids, if you have them.
     - ``attributes``: any extra tags to attach (free-form JSON, searchable).
-    - ``source``: where this traffic came from, e.g. ``"production"``;
-      defaults to the client's ``source`` when left empty.
+    - ``source``: provenance of this traffic, e.g. ``"production"``,
+      ``"staging"``, ``"simulation"`` (free-form). Left as ``None``, the span
+      inherits the client's default source when sent through
+      ``HardshellClient``; ``""`` means explicitly unlabeled (the server may
+      then apply your API key's environment default).
 
     Fields left empty are omitted from the wire payload (``backend`` and
     ``timestamp`` are always sent — the API requires them).
@@ -222,7 +225,7 @@ class RetrievalSpan:
     trace_id: str = ""
     span_id: str = ""
     attributes: dict[str, Any] = field(default_factory=dict)
-    source: str = ""
+    source: str | None = None
 
     def __post_init__(self) -> None:
         if isinstance(self.chunks, str | bytes):

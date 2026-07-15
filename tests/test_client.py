@@ -59,8 +59,7 @@ class TestIngestDocuments:
             "documents": [
                 {"document_id": "doc-1", "name": "handbook", "sensitivity": 0.2},
                 {"document_id": "doc-2"},
-            ],
-            "source": "",
+            ]
         }
 
     def test_dicts_pass_through_verbatim(self, edge, client):
@@ -76,6 +75,15 @@ class TestIngestDocuments:
         client = HardshellClient(api_key="k", base_url=edge.base_url, source="production")
         client.ingest_documents([])
         assert edge.last.json["source"] == "production"
+
+    def test_empty_string_source_forces_unlabeled(self, edge):
+        client = HardshellClient(api_key="k", base_url=edge.base_url, source="production")
+        client.ingest_documents([], source="")
+        assert "source" not in edge.last.json
+
+    def test_unlabeled_client_omits_source(self, edge, client):
+        client.ingest_documents([])
+        assert "source" not in edge.last.json
 
 
 class TestIngestChunks:
@@ -137,10 +145,15 @@ class TestSpans:
         client.ingest_spans([RetrievalSpan(chunks=["c-1"]), RetrievalSpan(chunks=["c-2"])])
         assert len(edge.last.json["spans"]) == 2
 
-    def test_typed_span_with_empty_source_inherits_client_source(self, edge):
+    def test_typed_span_with_unset_source_inherits_client_source(self, edge):
         client = HardshellClient(api_key="k", base_url=edge.base_url, source="production")
         client.ingest_spans([RetrievalSpan(chunks=["c-1"])])
         assert edge.last.json["spans"][0]["source"] == "production"
+
+    def test_empty_string_span_source_forces_unlabeled(self, edge):
+        client = HardshellClient(api_key="k", base_url=edge.base_url, source="production")
+        client.record_retrieval(chunks=["c-1"], source="")
+        assert "source" not in edge.last.json["spans"][0]
 
     def test_raw_dict_spans_sent_verbatim_never_modified(self, edge):
         client = HardshellClient(api_key="k", base_url=edge.base_url, source="production")

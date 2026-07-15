@@ -82,9 +82,19 @@ class HardshellClient:
         base_url: Your Hardshell endpoint, e.g. from your onboarding. The
             interactive API reference lives at ``<base_url>/docs``.
         timeout: Per-request timeout in seconds.
-        source: Default provenance label stamped on typed payloads this
-            client sends when a call doesn't set its own — e.g.
-            ``"production"``, ``"staging"``, ``"evaluation"``. Empty means
+        source: Default provenance label for everything this client sends —
+            *where is this traffic coming from?* Free-form; common values are
+            ``"production"``, ``"staging"``, ``"testing"``, ``"simulation"``,
+            ``"evaluation"``. Hardshell uses it to keep experimental traffic
+            out of production detection baselines and to filter reports.
+
+            Resolution order for each payload: an explicit per-call/per-span
+            ``source`` wins, then this client default, then the server-side
+            default attached to your API key (Hardshell can issue
+            environment-scoped keys), and otherwise the traffic is stored
+            unlabeled. Leave this as ``None`` if your API key is
+            environment-scoped — any value you send overrides the key's
+            default. Pass ``""`` at call level to force a payload through
             unlabeled. Raw dict spans are never modified.
     """
 
@@ -94,7 +104,7 @@ class HardshellClient:
         base_url: str,
         *,
         timeout: float = 5.0,
-        source: str = "",
+        source: str | None = None,
     ) -> None:
         if not api_key:
             raise ValueError("Hardshell api_key is required")
@@ -118,9 +128,13 @@ class HardshellClient:
         self,
         documents: Sequence[Document | dict[str, Any]],
         *,
-        source: str = "",
+        source: str | None = None,
     ) -> IngestDocumentsResult:
-        """Upsert source-document metadata (``POST /v1/documents``)."""
+        """Upsert source-document metadata (``POST /v1/documents``).
+
+        ``source`` labels the provenance of this push (see
+        :class:`HardshellClient`); ``None`` inherits the client default.
+        """
         return IngestDocumentsResult.from_payload(
             self._post_batch("/v1/documents", "documents", documents, source)
         )
@@ -129,9 +143,13 @@ class HardshellClient:
         self,
         chunks: Sequence[Chunk | dict[str, Any]],
         *,
-        source: str = "",
+        source: str | None = None,
     ) -> IngestChunksResult:
-        """Upsert per-chunk metadata (``POST /v1/chunks``)."""
+        """Upsert per-chunk metadata (``POST /v1/chunks``).
+
+        ``source`` labels the provenance of this push (see
+        :class:`HardshellClient`); ``None`` inherits the client default.
+        """
         return IngestChunksResult.from_payload(
             self._post_batch("/v1/chunks", "chunks", chunks, source)
         )
@@ -150,13 +168,15 @@ class HardshellClient:
         span_id: str = "",
         timestamp: datetime | None = None,
         attributes: dict[str, Any] | None = None,
-        source: str = "",
+        source: str | None = None,
     ) -> IngestSpansResult:
         """Send a single retrieval event — the common case.
 
         Call this after each vector-store query with the chunks it returned.
         Chunks can be ``(chunk_id, score)`` tuples, :class:`RetrievedChunk`
-        instances, dicts, or bare chunk-id strings.
+        instances, dicts, or bare chunk-id strings. ``source`` labels the
+        provenance of this event (see :class:`HardshellClient`); ``None``
+        inherits the client default.
         """
         span = RetrievalSpan(
             chunks=chunks,
@@ -178,15 +198,16 @@ class HardshellClient:
     ) -> IngestSpansResult:
         """Send one or more retrieval spans (``POST /v1/spans``).
 
-        Typed spans with an empty ``source`` inherit the client's default
-        source. Raw dict spans are sent verbatim — never modified — so the
-        server can apply its own defaults to them.
+        Typed spans whose ``source`` was left as ``None`` inherit the
+        client's default source; a span-level value (including ``""`` for
+        explicitly unlabeled) wins. Raw dict spans are sent verbatim — never
+        modified — so the server can apply its own defaults to them.
         """
         serialized = []
         for span in spans:
             if isinstance(span, RetrievalSpan):
                 payload = span.to_payload()
-                if not span.source and self._source:
+                if span.source is None and self._source:
                     payload["source"] = self._source
             else:
                 payload = dict(span)
@@ -230,9 +251,12 @@ class HardshellClient:
         path: str,
         key: str,
         items: Sequence[Any],
-        source: str,
+        source: str | None,
     ) -> dict[str, Any]:
-        payload = {key: [_payload_of(i) for i in items], "source": source or self._source}
+        effective = source if source is not None else self._source
+        payload: dict[str, Any] = {key: [_payload_of(i) for i in items]}
+        if effective:
+            payload["source"] = effective
         return self._post(path, payload)
 
     def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:

@@ -63,6 +63,16 @@ except Exception:
     logging.warning("hardshell telemetry failed (non-fatal)", exc_info=True)
 ```
 
+### Labeling traffic with `source`
+
+`source` says *where traffic came from* — free-form, commonly `"production"`,
+`"staging"`, `"testing"`, `"simulation"`, `"evaluation"`. Hardshell uses it to
+keep experimental traffic out of production detection baselines. Resolution
+order: per-call `source` → client default → your API key's environment
+default (server-side) → unlabeled. If Hardshell issued you an
+environment-scoped key, leave `source` unset and the key decides; pass
+`source=""` to force a payload through unlabeled.
+
 ### Batching spans
 
 If you'd rather not send per query, build `RetrievalSpan` objects as
