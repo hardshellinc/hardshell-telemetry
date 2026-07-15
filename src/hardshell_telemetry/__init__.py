@@ -1,3 +1,35 @@
 """Official Hardshell client for sending AI/RAG telemetry and reading derived reports."""
 
-__version__ = "0.0.0"
+from hardshell_telemetry._version import __version__
+from hardshell_telemetry.client import HardshellClient
+from hardshell_telemetry.exceptions import TelemetryError
+from hardshell_telemetry.types import (
+    Chunk,
+    ChunkAccessCount,
+    Document,
+    DocumentAccessReport,
+    DocumentAccessSummary,
+    DocumentLink,
+    IngestChunksResult,
+    IngestDocumentsResult,
+    IngestSpansResult,
+    RetrievalSpan,
+    RetrievedChunk,
+)
+
+__all__ = [
+    "Chunk",
+    "ChunkAccessCount",
+    "Document",
+    "DocumentAccessReport",
+    "DocumentAccessSummary",
+    "DocumentLink",
+    "IngestChunksResult",
+    "IngestDocumentsResult",
+    "IngestSpansResult",
+    "RetrievalSpan",
+    "RetrievedChunk",
+    "HardshellClient",
+    "TelemetryError",
+    "__version__",
+]

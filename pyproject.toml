@@ -1,7 +1,7 @@
 [project]
 name = "hardshell-telemetry"
 version = "0.0.0"
-description = "Official Hardshell client for sending AI/RAG telemetry and reading derived reports — placeholder pre-release"
+description = "Official Hardshell client for sending AI/RAG telemetry and reading derived reports"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
@@ -9,7 +9,7 @@ license-files = ["LICENSE"]
 authors = [{ name = "Hardshell", email = "ben@hardshell.ai" }]
 keywords = ["telemetry", "rag", "retrieval", "ai", "security", "observability"]
 classifiers = [
-    "Development Status :: 1 - Planning",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
@@ -21,6 +21,23 @@ dependencies = []
 [project.urls]
 Homepage = "https://hardshell.ai"
 Source = "https://github.com/hardshellinc/hardshell-telemetry"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.8",
+    "ty>=0.0.59",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [build-system]
 requires = ["uv_build>=0.10,<0.11"]
