@@ -122,6 +122,39 @@ client.ingest_chunks([
 All ingest methods also accept plain dicts, passed through verbatim, if you'd
 rather build payloads yourself.
 
+### Deriving document ids
+
+No stable document id? Derive one — deterministically, so re-ingesting
+upserts instead of forking, and anyone holding the same inputs re-derives the
+same id:
+
+```python
+from hardshell_telemetry import content_hash, derive_document_id
+
+doc_id = derive_document_id("s3://corpus/handbook.pdf")      # from your natural key
+doc_id = derive_document_id(content=raw_text)                # or from the content itself
+# recommended: both — stable identity plus change detection
+doc_id = derive_document_id("s3://corpus/handbook.pdf", content=raw_text)
+client.ingest_documents([{"document_id": doc_id, "content_hash": content_hash(raw_text)}])
+```
+
+Content is hashed locally and never transmitted. **Chunk ids are different**:
+if your vector store already has chunk ids, register those verbatim — the id
+your retrieval path reports is the join key. `derive_chunk_id` exists only
+for brand-new indexes. `sensitivity_from_level("high")` maps ordered tier
+labels onto the 0–1 `sensitivity` scale (custom vocabularies via `scale=`).
+
+### Chunking
+
+Built-in chunk strategies, or bring anything with `chunk(text) -> list[str]`:
+
+```python
+from hardshell_telemetry import FixedSizeChunker, ParagraphChunker, SentenceChunker
+
+chunks = FixedSizeChunker(800, overlap=100).chunk(text)
+chunks = ParagraphChunker(max_chars=1200).chunk(text)   # packs paragraphs, never cuts inside one
+```
+
 ## Reading reports
 
 ```python
