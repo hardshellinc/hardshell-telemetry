@@ -25,7 +25,10 @@ talks to it:
 - **Read reports** — pull derived signals back out, starting with
   document-access summaries.
 
-The interactive API reference lives at `<your-endpoint>/docs`.
+The interactive API reference lives at `https://api.qa.hardshell.dev/docs`.
+Note that this is currently in development, and the endpoint is a QA endpoint!
+This endpoint will be updated when the library is published.  If you are interested
+in being a beta user, please reach out to ben@hardshell.ai.
 
 ## Quickstart
 
