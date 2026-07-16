@@ -176,8 +176,9 @@ retrieval recording, and report reading. Each takes `HARDSHELL_API_KEY` and
 
 ## Roadmap
 
-- **Document intake helpers** — opinionated utilities for deriving stable
-  document ids, content hashing, and sensitivity recording (next up).
+- **Vector-store integration** — pick your vector DB (pgvector and Qdrant
+  first, as optional extras) and use our ingest/retrieval fronts; ids,
+  registration, and span recording handled for you (next up).
 - **Framework instrumentation** — auto-instrumentation for common RAG stacks,
   as optional extras; the base install stays dependency-free.
 

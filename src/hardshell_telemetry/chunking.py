@@ -42,7 +42,10 @@ class FixedSizeChunker:
     """
 
     size: int
+    """Window length in characters; the final window may be shorter."""
+
     overlap: int = 0
+    """Characters shared between neighboring windows; must be smaller than ``size``."""
 
     def __post_init__(self) -> None:
         if self.size <= 0:
@@ -53,6 +56,7 @@ class FixedSizeChunker:
             )
 
     def chunk(self, text: str) -> list[str]:
+        """Split ``text`` into character windows covering it end to end."""
         if not text:
             return []
         step = self.size - self.overlap
@@ -101,12 +105,14 @@ class ParagraphChunker:
     """
 
     max_chars: int | None = None
+    """Greedy packing limit per chunk; ``None`` keeps one paragraph per chunk."""
 
     def __post_init__(self) -> None:
         if self.max_chars is not None and self.max_chars <= 0:
             raise ValueError(f"max_chars must be positive, got {self.max_chars}")
 
     def chunk(self, text: str) -> list[str]:
+        """Split ``text`` at blank lines, packing paragraphs up to ``max_chars``."""
         paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
         return _pack(paragraphs, self.max_chars, "\n\n")
 
@@ -123,11 +129,13 @@ class SentenceChunker:
     """
 
     max_chars: int | None = None
+    """Greedy packing limit per chunk; ``None`` keeps one sentence per chunk."""
 
     def __post_init__(self) -> None:
         if self.max_chars is not None and self.max_chars <= 0:
             raise ValueError(f"max_chars must be positive, got {self.max_chars}")
 
     def chunk(self, text: str) -> list[str]:
+        """Split ``text`` at sentence boundaries, packing up to ``max_chars``."""
         sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
         return _pack(sentences, self.max_chars, " ")

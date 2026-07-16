@@ -32,13 +32,14 @@ __all__ = [
     "sensitivity_from_level",
 ]
 
-# = uuid.uuid5(uuid.NAMESPACE_URL, "https://hardshell.ai/document").
-# Pinned as a literal so a refactor can't silently change every derived id;
-# the golden tests hold this constant forever.
 HARDSHELL_DOC_NAMESPACE: Final = uuid.UUID("0169b2a1-86c2-5d3a-a28c-45728827aa43")
+"""The uuid5 namespace for derived document ids.
 
-# Ordered least → most sensitive. Free-form labels are also fine everywhere;
-# this is the recommended vocabulary and the default for sensitivity_from_level.
+Equal to ``uuid5(NAMESPACE_URL, "https://hardshell.ai/document")`` — pinned as
+a literal so a refactor can't silently change every derived id; the golden
+tests hold this constant forever.
+"""
+
 DEFAULT_SENSITIVITY_SCALE: Final[tuple[str, ...]] = (
     "public",
     "low",
@@ -46,6 +47,11 @@ DEFAULT_SENSITIVITY_SCALE: Final[tuple[str, ...]] = (
     "high",
     "critical",
 )
+"""Recommended sensitivity tiers, ordered least → most sensitive.
+
+The default scale for :func:`sensitivity_from_level`. Free-form labels are
+also fine everywhere labels are accepted.
+"""
 
 
 def content_hash(content: str | bytes) -> str:
