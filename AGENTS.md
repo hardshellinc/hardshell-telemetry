@@ -26,6 +26,12 @@ live endpoint, so don't run them in CI or tests).
   one method per public endpoint.
 - `src/hardshell_telemetry/types.py` — dataclasses mirroring the REST
   contract; inputs implement `to_payload()`, outputs `from_payload()`.
+- `src/hardshell_telemetry/intake.py` — pure id/sensitivity derivation. The
+  document-id contract lives here (pinned uuid5 namespace); the golden tests
+  in `tests/test_intake.py` pin it — if a change breaks one of those values,
+  the change is wrong, not the test.
+- `src/hardshell_telemetry/chunking.py` — `Chunker` protocol + stdlib
+  built-in strategies (fixed-size, paragraph, sentence).
 - `src/hardshell_telemetry/exceptions.py` — `TelemetryError`.
 - `tests/conftest.py` — `FakeEdge`, a real localhost HTTP server used by all
   client tests; prefer it over mocking the transport.
