@@ -93,25 +93,36 @@ def derive_document_id(key: str | None = None, *, content: str | bytes | None = 
     return str(uuid.uuid5(HARDSHELL_DOC_NAMESPACE, natural_key))
 
 
-def derive_chunk_id(document_id: str, index: int, *, content: str | bytes | None = None) -> str:
+def derive_chunk_id(
+    document_id: str,
+    index: int,
+    *,
+    content: str | bytes | None = None,
+    separator: str = ":",
+    index_width: int = 4,
+    content_hash_chars: int = 8,
+) -> str:
     """Mint a chunk id for a NEW index — greenfield only.
 
     If your vector store already has chunk ids, do not use this: register
     the store's ids verbatim, because the id your retrieval path reports is
     the join key.
 
-    The id is ``"{document_id}:{index:04d}"``, plus ``":{first 8 hash chars}"``
-    when ``content`` is given so re-chunked content is distinguishable across
-    index rebuilds. Deterministic: same inputs → same id. Store this exact
-    string in your vector store (as the record id or in its metadata).
+    The default format is ``"{document_id}:{index:04d}"``, plus ``":{first 8
+    hash chars}"`` when ``content`` is given so re-chunked content is
+    distinguishable across index rebuilds. ``separator`` / ``index_width`` /
+    ``content_hash_chars`` adjust the format (pick once and never change —
+    the format is part of your ids). Deterministic: same inputs → same id.
+    Store this exact string in your vector store (as the record id or in its
+    metadata).
     """
     if not document_id:
         raise ValueError("derive_chunk_id needs the parent document_id")
     if index < 0:
         raise ValueError(f"chunk index must be >= 0, got {index}")
-    base = f"{document_id}:{index:04d}"
+    base = f"{document_id}{separator}{index:0{index_width}d}"
     if content is not None:
-        return f"{base}:{content_hash(content)[:8]}"
+        return f"{base}{separator}{content_hash(content)[:content_hash_chars]}"
     return base
 
 

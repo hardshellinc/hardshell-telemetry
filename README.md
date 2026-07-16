@@ -192,6 +192,52 @@ uv run ty check  # type-check
 uv build         # wheel + sdist
 ```
 
+## Appendix: how we chose document identity
+
+Design rationale for the id system, informed by a survey of how RAG
+frameworks and production teams handle identity (July 2026). The short
+version: **your id is the identity; the content hash is the version; we never
+transform an id you already have.**
+
+**Two-tier identity.** A document's id is a stable pointer; its
+`content_hash` records what the content was when registered. This mirrors
+git (ref → blob) and is the consensus of every production writeup we
+studied — the alternative, using the content hash *as* the id (LangChain's
+indexing API, Haystack), means every edit re-keys the document, which is why
+those systems need bookkeeping tables and delete-and-re-add cleanup modes to
+function at all.
+
+**Ids pass through verbatim.** Retrieval telemetry joins on the exact id
+string your retrieval path reports. Any transformation applied at
+registration but not at query time silently breaks that join — so the
+library never wraps, hashes, or normalizes an id you supply. Derivation
+(`derive_document_id`, `derive_chunk_id`) exists only for records that have
+no id yet, and it's deterministic (uuid5 under a pinned, published
+namespace) so anyone can re-derive the same id from the same inputs, in any
+language, forever.
+
+**Metadata never goes in the hash.** Frameworks that hash content + metadata
+into identity have repeatedly shipped identity breakage: unstable dict
+serialization changed every id (Haystack ≤2.x → 3.0), and a hash-recipe
+regression made metadata edits invisible (LlamaIndex 0.12). Including
+metadata means any bookkeeping key forks identity; our `content_hash` is
+content-only, so metadata edits never fork a document and content edits are
+visible as version changes.
+
+**Re-chunking creates generations, not deletions.** Chunk identity does not
+survive a re-chunk anywhere in the ecosystem — the standard coping
+strategies are "never expose chunk ids" or "freeze your chunking
+parameters." We keep it honest instead: new chunking runs register new chunk
+ids alongside the old ones, all linked to the same document, so lineage is
+preserved and stale-index retrievals remain attributable rather than
+becoming unknowns.
+
+**Migration is a diff, not a leap of faith.** Across LangChain, LlamaIndex,
+and Haystack, changing an id scheme means "start a fresh index." Here,
+`plan_ids` reports exactly which ids would change — locally, before anything
+is sent — so switching libraries or strategies is a reviewed decision
+instead of a silent join break.
+
 ## License
 
 [Apache-2.0](LICENSE)
