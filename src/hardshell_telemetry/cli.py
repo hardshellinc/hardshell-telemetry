@@ -107,28 +107,118 @@ class _Step:
     detail: str
 
 
-def _cmd_smoke_test(args: argparse.Namespace) -> int:
-    steps: list[_Step] = []
-    run_id = args.run_id or uuid.uuid4().hex[:8]
-    doc_id = f"hardshell-smoke:{run_id}"
-    chunk_ids = [f"hardshell-smoke:{run_id}:0", f"hardshell-smoke:{run_id}:1"]
+class _SmokeTest:
+    """The end-to-end verification, one method per step.
 
-    def emit(step: _Step) -> None:
-        steps.append(step)
-        if not args.json:
-            mark = "PASS" if step.ok else "FAIL"
-            print(f"[{mark}] {step.name}: {step.detail}")
+    Steps run in order and stop at the first failure; ``run`` returns the
+    process exit code. Step names (config/register/record/join) are part of
+    the ``--json`` contract the agent skill keys on — don't rename casually.
+    """
 
-    def finish() -> int:
-        passed = all(s.ok for s in steps)
-        if args.json:
+    def __init__(
+        self,
+        client: HardshellClient,
+        *,
+        run_id: str,
+        poll_seconds: float,
+        as_json: bool,
+    ) -> None:
+        self.client = client
+        self.run_id = run_id
+        self.poll_seconds = poll_seconds
+        self.as_json = as_json
+        self.steps: list[_Step] = []
+        self.document_id = f"hardshell-smoke:{run_id}"
+        self.chunk_ids = [f"{self.document_id}:0", f"{self.document_id}:1"]
+
+    def run(self) -> int:
+        self._emit("config", True, "api key and base_url present")
+        for step in (self._register, self._record, self._join):
+            if not step():
+                break
+        return self._finish()
+
+    def _emit(self, name: str, ok: bool, detail: str) -> bool:
+        self.steps.append(_Step(name, ok, detail))
+        if not self.as_json:
+            print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
+        return ok
+
+    def _register(self) -> bool:
+        try:
+            self.client.ingest_documents(
+                [
+                    Document(
+                        document_id=self.document_id,
+                        name=f"Hardshell smoke test {self.run_id}",
+                    )
+                ]
+            )
+            self.client.ingest_chunks(
+                [
+                    Chunk(
+                        chunk_id=cid,
+                        document_links=[DocumentLink(document_id=self.document_id)],
+                    )
+                    for cid in self.chunk_ids
+                ]
+            )
+        except TelemetryError as exc:
+            return self._emit("register", False, f"{exc} — {_hint_for(exc)}")
+        return self._emit("register", True, f"document + {len(self.chunk_ids)} chunks upserted")
+
+    def _record(self) -> bool:
+        try:
+            spans = self.client.record_retrieval(
+                chunks=[(self.chunk_ids[0], 0.91), (self.chunk_ids[1], 0.88)],
+                user_id=f"hardshell-smoke-{self.run_id}",
+                backend="smoke-test",
+            )
+        except TelemetryError as exc:
+            return self._emit("record", False, f"{exc} — {_hint_for(exc)}")
+        return self._emit("record", True, f"{spans.spans_accepted} span accepted")
+
+    def _join(self) -> bool:
+        deadline = time.monotonic() + self.poll_seconds
+        while time.monotonic() < deadline:
+            try:
+                doc = self._find_document()
+            except TelemetryError as exc:
+                return self._emit("report", False, f"{exc} — {_hint_for(exc)}")
+            if doc and {c.chunk_id for c in doc.chunks if c.access_count} >= set(self.chunk_ids):
+                return self._emit("join", True, "retrieval joined back to the registered chunks")
+            time.sleep(min(2.0, self.poll_seconds / 5))
+        return self._emit(
+            "join",
+            False,
+            f"registered chunk ids never showed retrievals within {self.poll_seconds}s — "
+            "if register and record passed, the ids your retrieval path reports may "
+            "not match the ids you register",
+        )
+
+    def _find_document(self) -> DocumentAccessSummary | None:
+        # The report is paginated; walk every page — on a busy tenant the
+        # smoke document may not be on the first one.
+        page_size, offset = 200, 0
+        while True:
+            report = self.client.document_access_report(limit=page_size, offset=offset)
+            doc = next((d for d in report.documents if d.document_id == self.document_id), None)
+            if doc:
+                return doc
+            offset += len(report.documents)
+            if not report.documents or offset >= report.total_documents:
+                return None
+
+    def _finish(self) -> int:
+        passed = all(step.ok for step in self.steps)
+        if self.as_json:
             print(
                 json.dumps(
                     {
                         "passed": passed,
-                        "steps": [vars(s) for s in steps],
-                        "document_id": doc_id,
-                        "chunk_ids": chunk_ids,
+                        "steps": [vars(step) for step in self.steps],
+                        "document_id": self.document_id,
+                        "chunk_ids": self.chunk_ids,
                     }
                 )
             )
@@ -136,76 +226,15 @@ def _cmd_smoke_test(args: argparse.Namespace) -> int:
             print("smoke test PASSED" if passed else "smoke test FAILED")
         return 0 if passed else 1
 
-    try:
-        client = _client(args)
-    except _CliError:
-        raise
-    emit(_Step("config", True, "api key and base_url present"))
 
-    try:
-        client.ingest_documents(
-            [Document(document_id=doc_id, name=f"Hardshell smoke test {run_id}")]
-        )
-        client.ingest_chunks(
-            [
-                Chunk(chunk_id=cid, document_links=[DocumentLink(document_id=doc_id)])
-                for cid in chunk_ids
-            ]
-        )
-        emit(_Step("register", True, f"document + {len(chunk_ids)} chunks upserted"))
-    except TelemetryError as exc:
-        emit(_Step("register", False, f"{exc} — {_hint_for(exc)}"))
-        return finish()
-
-    try:
-        spans = client.record_retrieval(
-            chunks=[(chunk_ids[0], 0.91), (chunk_ids[1], 0.88)],
-            user_id=f"hardshell-smoke-{run_id}",
-            backend="smoke-test",
-        )
-        emit(_Step("record", True, f"{spans.spans_accepted} span accepted"))
-    except TelemetryError as exc:
-        emit(_Step("record", False, f"{exc} — {_hint_for(exc)}"))
-        return finish()
-
-    def find_document() -> DocumentAccessSummary | None:
-        # The report is paginated; walk every page — on a busy tenant the
-        # smoke document may not be on the first one.
-        page_size, offset = 200, 0
-        while True:
-            report = client.document_access_report(limit=page_size, offset=offset)
-            doc = next((d for d in report.documents if d.document_id == doc_id), None)
-            if doc:
-                return doc
-            offset += len(report.documents)
-            if not report.documents or offset >= report.total_documents:
-                return None
-
-    deadline = time.monotonic() + args.poll_seconds
-    joined = False
-    while time.monotonic() < deadline:
-        try:
-            doc = find_document()
-        except TelemetryError as exc:
-            emit(_Step("report", False, f"{exc} — {_hint_for(exc)}"))
-            return finish()
-        if doc and {c.chunk_id for c in doc.chunks if c.access_count} >= set(chunk_ids):
-            joined = True
-            break
-        time.sleep(min(2.0, args.poll_seconds / 5))
-    if joined:
-        emit(_Step("join", True, "retrieval joined back to the registered chunks"))
-    else:
-        emit(
-            _Step(
-                "join",
-                False,
-                f"registered chunk ids never showed retrievals within {args.poll_seconds}s — "
-                "if register and record passed, the ids your retrieval path reports may "
-                "not match the ids you register",
-            )
-        )
-    return finish()
+def _cmd_smoke_test(args: argparse.Namespace) -> int:
+    smoke = _SmokeTest(
+        _client(args),
+        run_id=args.run_id or uuid.uuid4().hex[:8],
+        poll_seconds=args.poll_seconds,
+        as_json=args.json,
+    )
+    return smoke.run()
 
 
 # ── corpus loading (JSONL) ───────────────────────────────────────────────────
