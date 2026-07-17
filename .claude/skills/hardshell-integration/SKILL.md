@@ -73,10 +73,13 @@ are the ids **already in the vector store**, verbatim.
 
 ## Interpreting `report document-access`
 
-Zero retrievals against documents you know are being queried = the id
-mismatch case: the application's retrieval path is reporting different chunk
-ids than were registered. Compare a live retrieval's ids against the
-registered ones (`--json` and diff).
+Zero retrievals against documents you know are being queried: rule out the
+mundane causes first — rerun **without** `--days`/`--limit` (a retrieval
+outside the window or a page cut by the limit also reads as zero) and allow
+a minute of report lag. If a broad, unrestricted query still shows zero,
+it's the id mismatch case: the application's retrieval path is reporting
+different chunk ids than were registered. Compare a live retrieval's ids
+against the registered ones (`--json` and diff).
 
 ## What this CLI does not do (yet)
 

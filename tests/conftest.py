@@ -46,7 +46,7 @@ class _Response:
 class FakeEdge:
     server: ThreadingHTTPServer | None = None
     requests: list[RecordedRequest] = field(default_factory=list)
-    responses: dict[tuple[str, str], _Response] = field(default_factory=dict)
+    responses: dict[tuple[str, str], list[_Response]] = field(default_factory=dict)
 
     @property
     def base_url(self) -> str:
@@ -75,14 +75,21 @@ class FakeEdge:
         ``raw_body`` overrides ``body`` with non-JSON bytes; ``delay`` makes
         the handler stall before responding (for timeout tests).
         """
-        self.responses[(method, path)] = _Response(
-            status=status,
-            body=body,
-            raw_body=raw_body,
-            content_type=content_type,
-            headers=headers or {},
-            delay=delay,
-        )
+        self.responses[(method, path)] = [
+            _Response(
+                status=status,
+                body=body,
+                raw_body=raw_body,
+                content_type=content_type,
+                headers=headers or {},
+                delay=delay,
+            )
+        ]
+
+    def respond_sequence(self, method: str, path: str, bodies: list) -> None:
+        """Queue several 200 responses for (method, path), served in order;
+        the final one repeats for any further requests."""
+        self.responses[(method, path)] = [_Response(body=b) for b in bodies]
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -104,7 +111,13 @@ class _Handler(BaseHTTPRequestHandler):
                 json=json.loads(raw) if raw else None,
             )
         )
-        response = self.edge.responses.get((method, split.path), _Response())
+        queued = self.edge.responses.get((method, split.path))
+        if not queued:
+            response = _Response()
+        elif len(queued) > 1:
+            response = queued.pop(0)
+        else:
+            response = queued[0]
         if response.delay:
             time.sleep(response.delay)
         encoded = response.encoded()

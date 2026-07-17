@@ -40,7 +40,7 @@ from hardshell_telemetry.ids import (
     LegacyNamespaceIds,
     plan_ids,
 )
-from hardshell_telemetry.types import Chunk, Document, DocumentLink
+from hardshell_telemetry.types import Chunk, Document, DocumentAccessSummary, DocumentLink
 
 __all__ = ["main"]
 
@@ -71,6 +71,20 @@ def _add_connection_args(parser: argparse.ArgumentParser, *, default_source: str
         help=f"provenance label for traffic sent by this command (default: {default_source})",
     )
     parser.add_argument("--json", action="store_true", help="machine-readable output")
+
+
+def _positive_int(value: str) -> int:
+    number = int(value)
+    if number <= 0:
+        raise argparse.ArgumentTypeError(f"must be a positive integer, got {value}")
+    return number
+
+
+def _positive_float(value: str) -> float:
+    number = float(value)
+    if number <= 0:
+        raise argparse.ArgumentTypeError(f"must be a positive number, got {value}")
+    return number
 
 
 def _hint_for(error: TelemetryError) -> str:
@@ -154,15 +168,27 @@ def _cmd_smoke_test(args: argparse.Namespace) -> int:
         emit(_Step("record", False, f"{exc} — {_hint_for(exc)}"))
         return finish()
 
+    def find_document() -> DocumentAccessSummary | None:
+        # The report is paginated; walk every page — on a busy tenant the
+        # smoke document may not be on the first one.
+        page_size, offset = 200, 0
+        while True:
+            report = client.document_access_report(limit=page_size, offset=offset)
+            doc = next((d for d in report.documents if d.document_id == doc_id), None)
+            if doc:
+                return doc
+            offset += len(report.documents)
+            if not report.documents or offset >= report.total_documents:
+                return None
+
     deadline = time.monotonic() + args.poll_seconds
     joined = False
     while time.monotonic() < deadline:
         try:
-            report = client.document_access_report()
+            doc = find_document()
         except TelemetryError as exc:
             emit(_Step("report", False, f"{exc} — {_hint_for(exc)}"))
             return finish()
-        doc = next((d for d in report.documents if d.document_id == doc_id), None)
         if doc and {c.chunk_id for c in doc.chunks if c.access_count} >= set(chunk_ids):
             joined = True
             break
@@ -202,14 +228,21 @@ def _load_corpus(path: str) -> list[DocumentRecord]:
             raise _CliError(f"{path}:{line_no}: not valid JSON — {exc}") from exc
         if not isinstance(raw, dict):
             raise _CliError(f"{path}:{line_no}: expected a JSON object per line")
+        raw_chunks = raw.get("chunks", [])
+        if not isinstance(raw_chunks, list):
+            raise _CliError(f"{path}:{line_no}: chunks must be a JSON array of ids or objects")
         chunks: list[ChunkRecord | str] = []
-        for position, chunk in enumerate(raw.get("chunks", [])):
+        for position, chunk in enumerate(raw_chunks):
             if isinstance(chunk, str):
                 chunks.append(chunk)
             elif isinstance(chunk, dict):
-                chunks.append(
-                    ChunkRecord(existing_id=chunk.get("id"), content=chunk.get("content"))
-                )
+                existing_id = chunk.get("id")
+                chunk_content = chunk.get("content")
+                if existing_id is not None and not isinstance(existing_id, str):
+                    raise _CliError(f"{path}:{line_no}: chunk {position} id must be a string")
+                if chunk_content is not None and not isinstance(chunk_content, str):
+                    raise _CliError(f"{path}:{line_no}: chunk {position} content must be a string")
+                chunks.append(ChunkRecord(existing_id=existing_id, content=chunk_content))
             else:
                 raise _CliError(
                     f"{path}:{line_no}: chunk {position} must be a string id or an object"
@@ -397,7 +430,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_connection_args(smoke, default_source="testing")
     smoke.add_argument(
         "--poll-seconds",
-        type=float,
+        type=_positive_float,
         default=30.0,
         help="how long to wait for the report join (default 30)",
     )
@@ -426,7 +459,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="proceed even when the strategy changes existing ids (an intentional migration)",
     )
-    register.add_argument("--batch-size", type=int, default=500)
+    register.add_argument("--batch-size", type=_positive_int, default=500)
     _add_connection_args(register, default_source="index-build")
     register.set_defaults(handler=_cmd_register_corpus)
 
@@ -435,8 +468,8 @@ def _build_parser() -> argparse.ArgumentParser:
     document_access = report_kind.add_parser(
         "document-access", help="how often your chunks are retrieved, by document"
     )
-    document_access.add_argument("--days", type=int, help="window: last N days")
-    document_access.add_argument("--limit", type=int, help="page size")
+    document_access.add_argument("--days", type=_positive_int, help="window: last N days")
+    document_access.add_argument("--limit", type=_positive_int, help="page size")
     _add_connection_args(document_access, default_source=None)
     document_access.set_defaults(handler=_cmd_report)
 

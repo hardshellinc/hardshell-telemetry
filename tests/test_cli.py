@@ -92,6 +92,34 @@ class TestSmokeTest:
         assert "[FAIL] join" in out
         assert "may not match the ids you register" in out
 
+    def test_join_walks_report_pages(self, edge, capsys):
+        # Smoke doc sits on page 2 of a busy tenant's report.
+        doc_id = "hardshell-smoke:fixedrun"
+        chunk_ids = [f"{doc_id}:0", f"{doc_id}:1"]
+        filler = [
+            {"document_id": f"other-{i}", "name": "", "chunk_count": 0, "chunks": []}
+            for i in range(200)
+        ]
+        target = {
+            "document_id": doc_id,
+            "name": "smoke",
+            "chunk_count": 2,
+            "chunks": [{"chunk_id": c, "access_count": 1} for c in chunk_ids],
+        }
+        edge.respond_sequence(
+            "GET",
+            "/v1/reports/document-access",
+            [
+                {"documents": filler, "total_documents": 201},
+                {"documents": [target], "total_documents": 201},
+            ],
+        )
+        code = main(["smoke-test", *connection(edge), "--run-id", "fixedrun", "--json"])
+        assert code == 0
+        assert json.loads(capsys.readouterr().out)["passed"] is True
+        report_calls = [r for r in edge.requests if r.path == "/v1/reports/document-access"]
+        assert report_calls[1].query.get("offset") == ["200"]
+
     def test_auth_failure_hints_at_key(self, edge, capsys):
         edge.respond("POST", "/v1/documents", status=401, body={"detail": "bad key"})
         code = main(["smoke-test", *connection(edge), "--json"])
@@ -128,6 +156,16 @@ class TestValidateCorpus:
         path = corpus_file([{"id": "doc-1"}])
         assert main(["validate-corpus", path, "--strategy", "nope"]) == 2
         assert "legacy:<uuid>" in capsys.readouterr().err
+
+    def test_chunks_must_be_an_array(self, corpus_file, capsys):
+        path = corpus_file([{"id": "doc-1", "chunks": {"c-1": True}}])
+        assert main(["validate-corpus", path]) == 2
+        assert "must be a JSON array" in capsys.readouterr().err
+
+    def test_null_chunks_rejected_with_line_number(self, corpus_file, capsys):
+        path = corpus_file([{"id": "doc-1", "chunks": None}])
+        assert main(["validate-corpus", path]) == 2
+        assert ":1:" in capsys.readouterr().err
 
 
 class TestRegisterCorpus:
@@ -188,6 +226,19 @@ class TestRegisterCorpus:
         assert code == 1
         assert "nothing was sent" in capsys.readouterr().err
         assert edge.requests == []
+
+    @pytest.mark.parametrize("value", ["0", "-3"])
+    def test_nonpositive_batch_size_rejected_at_parse(self, edge, corpus_file, value):
+        path = corpus_file([{"id": "doc-1", "chunks": ["c-1"]}])
+        with pytest.raises(SystemExit) as excinfo:
+            main(["register-corpus", path, "--batch-size", value, *connection(edge)])
+        assert excinfo.value.code == 2
+        assert edge.requests == []
+
+    def test_nonpositive_poll_seconds_rejected_at_parse(self, edge):
+        with pytest.raises(SystemExit) as excinfo:
+            main(["smoke-test", "--poll-seconds", "0", *connection(edge)])
+        assert excinfo.value.code == 2
 
     def test_batching_respects_batch_size(self, edge, corpus_file):
         path = corpus_file([{"id": "doc-1", "chunks": [f"c-{i}" for i in range(5)]}])
