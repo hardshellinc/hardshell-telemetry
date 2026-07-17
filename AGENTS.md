@@ -32,6 +32,14 @@ live endpoint, so don't run them in CI or tests).
   the change is wrong, not the test.
 - `src/hardshell_telemetry/chunking.py` — `Chunker` protocol + stdlib
   built-in strategies (fixed-size, paragraph, sentence).
+- `src/hardshell_telemetry/ids.py` — `IdStrategy` protocol + strategies and
+  the `plan_ids` migration dry-run; only calls `intake.py` derivation.
+- `src/hardshell_telemetry/cli.py` — the `hardshell` console script
+  (argparse, stdlib-only). Subcommand handlers return exit codes; tests
+  drive `main([...])` directly against FakeEdge.
+- `.claude/skills/hardshell-integration/SKILL.md` — agent-facing runbook for
+  the CLI (when to run what, failure→fix map). Update it when CLI behavior
+  changes.
 - `src/hardshell_telemetry/exceptions.py` — `TelemetryError`.
 - `tests/conftest.py` — `FakeEdge`, a real localhost HTTP server used by all
   client tests; prefer it over mocking the transport.
