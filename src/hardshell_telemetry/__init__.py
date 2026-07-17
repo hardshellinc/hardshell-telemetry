@@ -9,6 +9,18 @@ from hardshell_telemetry.chunking import (
 )
 from hardshell_telemetry.client import HardshellClient
 from hardshell_telemetry.exceptions import TelemetryError
+from hardshell_telemetry.ids import (
+    DEFAULT_ID_STRATEGY,
+    ChunkRecord,
+    DefaultIds,
+    DerivedIds,
+    DocumentRecord,
+    ExistingIds,
+    IdPlan,
+    IdStrategy,
+    LegacyNamespaceIds,
+    plan_ids,
+)
 from hardshell_telemetry.intake import (
     DEFAULT_SENSITIVITY_SCALE,
     HARDSHELL_DOC_NAMESPACE,
@@ -32,12 +44,21 @@ from hardshell_telemetry.types import (
 )
 
 __all__ = [
+    "DEFAULT_ID_STRATEGY",
     "DEFAULT_SENSITIVITY_SCALE",
     "HARDSHELL_DOC_NAMESPACE",
     "Chunk",
     "ChunkAccessCount",
+    "ChunkRecord",
     "Chunker",
+    "DefaultIds",
+    "DerivedIds",
     "Document",
+    "DocumentRecord",
+    "ExistingIds",
+    "IdPlan",
+    "IdStrategy",
+    "LegacyNamespaceIds",
     "DocumentAccessReport",
     "DocumentAccessSummary",
     "DocumentLink",
@@ -55,5 +76,6 @@ __all__ = [
     "content_hash",
     "derive_chunk_id",
     "derive_document_id",
+    "plan_ids",
     "sensitivity_from_level",
 ]
