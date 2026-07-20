@@ -25,6 +25,7 @@ import time
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from hardshell_telemetry._version import __version__
@@ -307,7 +308,7 @@ def _parse_strategy(spec: str) -> IdStrategy:
 
 def _print_plan(plan: IdPlan, as_json: bool) -> None:
     if as_json:
-        payload = {k: v for k, v in vars(plan).items()}
+        payload = dict(vars(plan))
         payload["safe"] = plan.safe
         print(json.dumps(payload))
     else:
@@ -402,12 +403,10 @@ def _cmd_register_corpus(args: argparse.Namespace) -> int:
 
 
 def _cmd_report(args: argparse.Namespace) -> int:
-    from datetime import UTC, datetime, timedelta
-
     client = _client(args)
     window_start = datetime.now(UTC) - timedelta(days=args.days) if args.days is not None else None
     try:
-        report = client.document_access_report(window_start=window_start, limit=args.limit or None)
+        report = client.document_access_report(window_start=window_start, limit=args.limit)
     except TelemetryError as exc:
         print(f"report failed: {exc} — {_hint_for(exc)}", file=sys.stderr)
         return 1
