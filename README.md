@@ -168,6 +168,27 @@ for doc in report.documents:
     print(doc.document_id, sum(c.access_count for c in doc.chunks))
 ```
 
+## The `hardshell` CLI
+
+Installed with the package. Set `HARDSHELL_API_KEY` and `HARDSHELL_BASE_URL`,
+then:
+
+```sh
+hardshell smoke-test                              # end-to-end: register → record → join
+hardshell validate-corpus corpus.jsonl            # local join-safety checks, no network
+hardshell register-corpus corpus.jsonl --dry-run  # "these ids will change" report
+hardshell register-corpus corpus.jsonl            # actually register (aborts on id changes
+                                                  #   unless --allow-id-changes)
+hardshell report document-access --days 7         # what Hardshell sees
+```
+
+Corpus files are JSONL, one document per line —
+`{"id": ..., "name": ..., "content": ..., "chunks": ["chunk-id", ...]}` —
+with document content hashed locally and never transmitted. Add `--json` to
+any command for machine-readable output. Integrating with a coding agent?
+Point it at
+[`.claude/skills/hardshell-integration/SKILL.md`](.claude/skills/hardshell-integration/SKILL.md).
+
 ## Examples
 
 Runnable scripts live in [`examples/`](examples/): corpus registration,

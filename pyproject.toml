@@ -22,6 +22,9 @@ dependencies = []
 Homepage = "https://hardshell.ai"
 Source = "https://github.com/hardshellinc/hardshell-telemetry"
 
+[project.scripts]
+hardshell = "hardshell_telemetry.cli:main"
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",
