@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 import time
@@ -82,7 +83,7 @@ def _positive_int(value: str) -> int:
 
 def _positive_float(value: str) -> float:
     number = float(value)
-    if number <= 0:
+    if not math.isfinite(number) or number <= 0:
         raise argparse.ArgumentTypeError(f"must be a positive number, got {value}")
     return number
 
@@ -184,7 +185,7 @@ class _SmokeTest:
             try:
                 doc = self._find_document()
             except TelemetryError as exc:
-                return self._emit("report", False, f"{exc} — {_hint_for(exc)}")
+                return self._emit("join", False, f"{exc} — {_hint_for(exc)}")
             if doc and {c.chunk_id for c in doc.chunks if c.access_count} >= set(self.chunk_ids):
                 return self._emit("join", True, "retrieval joined back to the registered chunks")
             time.sleep(min(2.0, self.poll_seconds / 5))

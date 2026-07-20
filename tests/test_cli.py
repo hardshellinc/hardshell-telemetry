@@ -235,9 +235,10 @@ class TestRegisterCorpus:
         assert excinfo.value.code == 2
         assert edge.requests == []
 
-    def test_nonpositive_poll_seconds_rejected_at_parse(self, edge):
+    @pytest.mark.parametrize("value", ["0", "-3", "nan", "inf"])
+    def test_nonpositive_poll_seconds_rejected_at_parse(self, edge, value):
         with pytest.raises(SystemExit) as excinfo:
-            main(["smoke-test", "--poll-seconds", "0", *connection(edge)])
+            main(["smoke-test", "--poll-seconds", value, *connection(edge)])
         assert excinfo.value.code == 2
 
     def test_batching_respects_batch_size(self, edge, corpus_file):
