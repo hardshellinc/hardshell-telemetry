@@ -7,7 +7,7 @@ from hardshell_telemetry.chunking import (
     ParagraphChunker,
     SentenceChunker,
 )
-from hardshell_telemetry.client import HardshellClient
+from hardshell_telemetry.client import HardshellClient, TelemetryClient
 from hardshell_telemetry.exceptions import TelemetryError
 from hardshell_telemetry.ids import (
     DEFAULT_ID_STRATEGY,
@@ -25,6 +25,7 @@ from hardshell_telemetry.intake import (
     DEFAULT_SENSITIVITY_SCALE,
     HARDSHELL_DOC_NAMESPACE,
     content_hash,
+    corpus_name,
     derive_chunk_id,
     derive_document_id,
     sensitivity_from_level,
@@ -32,6 +33,7 @@ from hardshell_telemetry.intake import (
 from hardshell_telemetry.types import (
     Chunk,
     ChunkAccessCount,
+    CorpusAccessCount,
     Document,
     DocumentAccessReport,
     DocumentAccessSummary,
@@ -51,6 +53,7 @@ __all__ = [
     "ChunkAccessCount",
     "ChunkRecord",
     "Chunker",
+    "CorpusAccessCount",
     "DefaultIds",
     "DerivedIds",
     "Document",
@@ -71,9 +74,11 @@ __all__ = [
     "RetrievalSpan",
     "RetrievedChunk",
     "SentenceChunker",
+    "TelemetryClient",
     "TelemetryError",
     "__version__",
     "content_hash",
+    "corpus_name",
     "derive_chunk_id",
     "derive_document_id",
     "plan_ids",

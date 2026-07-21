@@ -20,6 +20,7 @@ from typing import Any
 __all__ = [
     "Chunk",
     "ChunkAccessCount",
+    "CorpusAccessCount",
     "Document",
     "DocumentAccessReport",
     "DocumentAccessSummary",
@@ -211,6 +212,11 @@ class RetrievalSpan:
       inherits the client's default source when sent through
       ``HardshellClient``; ``""`` means explicitly unlabeled (the server may
       then apply your API key's environment default).
+    - ``corpus``: which corpus (vector store) this search read from, named
+      ``"backend:collection"`` e.g. ``"qdrant:docs-prod"`` — this is what lets
+      Hardshell show a document's retrieval across every index it lives in.
+      Behaves like ``source``: left as ``None`` it inherits the client's
+      default corpus; ``""`` sends it explicitly unset.
 
     Fields left empty are omitted from the wire payload (``backend`` and
     ``timestamp`` are always sent — the API requires them).
@@ -226,6 +232,7 @@ class RetrievalSpan:
     span_id: str = ""
     attributes: dict[str, Any] = field(default_factory=dict)
     source: str | None = None
+    corpus: str | None = None
 
     def __post_init__(self) -> None:
         if isinstance(self.chunks, str | bytes):
@@ -250,6 +257,7 @@ class RetrievalSpan:
             "trace_id": self.trace_id,
             "span_id": self.span_id,
             "source": self.source,
+            "corpus": self.corpus,
         }
         payload.update({k: v for k, v in optional.items() if v})
         if self.attributes:
@@ -324,13 +332,42 @@ class ChunkAccessCount:
 
 
 @dataclass(frozen=True)
+class CorpusAccessCount:
+    """One corpus's share of a document's retrievals within the report window.
+
+    ``corpus`` is the vector store the retrievals read from (``""`` groups
+    traffic sent without a corpus label). ``access_count`` is the number of
+    chunk accesses attributed to that corpus for this document.
+    """
+
+    corpus: str
+    access_count: int
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> CorpusAccessCount:
+        """Parse one corpus entry of a document's report breakdown."""
+        return cls(
+            corpus=payload.get("corpus", ""),
+            access_count=int(payload["access_count"]),
+        )
+
+
+@dataclass(frozen=True)
 class DocumentAccessSummary:
-    """How often one document's chunks were retrieved in the window."""
+    """How often one document's chunks were retrieved in the window.
+
+    When the server supplies the breakdown, ``corpora`` re-slices the same
+    retrievals as ``chunks`` by the corpus each read from — the "this document
+    across every index it lives in" view — and sums to the same total. It is
+    empty when the document had no retrievals in the window, or when the server
+    predates corpus support (older servers omit it, so the totals won't match).
+    """
 
     document_id: str
     name: str
     chunk_count: int
     chunks: tuple[ChunkAccessCount, ...]
+    corpora: tuple[CorpusAccessCount, ...] = ()
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> DocumentAccessSummary:
@@ -340,6 +377,7 @@ class DocumentAccessSummary:
             name=payload.get("name", ""),
             chunk_count=int(payload["chunk_count"]),
             chunks=tuple(ChunkAccessCount.from_payload(c) for c in payload.get("chunks", [])),
+            corpora=tuple(CorpusAccessCount.from_payload(c) for c in payload.get("corpora", [])),
         )
 
 

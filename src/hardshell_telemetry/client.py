@@ -36,7 +36,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Sequence
 from datetime import datetime
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from hardshell_telemetry._version import __version__
 from hardshell_telemetry.exceptions import TelemetryError
@@ -52,7 +52,7 @@ from hardshell_telemetry.types import (
     iso_timestamp,
 )
 
-__all__ = ["HardshellClient"]
+__all__ = ["HardshellClient", "TelemetryClient"]
 
 
 class _NoRedirects(urllib.request.HTTPRedirectHandler):
@@ -73,7 +73,89 @@ def _payload_of(item: Any) -> dict[str, Any]:
     return dict(item)
 
 
-class HardshellClient:
+@runtime_checkable
+class TelemetryClient(Protocol):
+    """The telemetry client contract, independent of transport.
+
+    :class:`HardshellClient` is the REST implementation shipped here. Code that
+    only needs to *send* telemetry and *read* reports can depend on this
+    protocol instead, and swap in another backend that speaks the same methods
+    over the same shared payload and result types (
+    :class:`~hardshell_telemetry.Document`,
+    :class:`~hardshell_telemetry.Chunk`,
+    :class:`~hardshell_telemetry.RetrievalSpan`,
+    :class:`~hardshell_telemetry.DocumentAccessReport`,
+    …).
+
+    Any object with these methods satisfies it structurally; subclass it
+    explicitly (as :class:`HardshellClient` does) for a static check that an
+    implementation stays in sync with the contract. Construction is
+    intentionally not part of the contract — each transport is built its own
+    way (an API key and base URL here; a channel or stub elsewhere).  While we
+    obviously hope you'll use our system, it is not the intent of this repo to
+    lock you in to using Hardshell, and you could easily put in a Datadog or
+    other telemetry platform client in place of ours, or wrap ours for dual
+    logging.
+    """
+
+    def ingest_documents(
+        self,
+        documents: Sequence[Document | dict[str, Any]],
+        *,
+        source: str | None = None,
+        corpus: str | None = None,
+    ) -> IngestDocumentsResult:
+        """Upsert source-document metadata."""
+        ...
+
+    def ingest_chunks(
+        self,
+        chunks: Sequence[Chunk | dict[str, Any]],
+        *,
+        source: str | None = None,
+        corpus: str | None = None,
+    ) -> IngestChunksResult:
+        """Upsert per-chunk metadata."""
+        ...
+
+    def record_retrieval(
+        self,
+        chunks: Sequence[RetrievedChunkLike],
+        *,
+        backend: str = "",
+        user_id: str = "",
+        session_id: str = "",
+        ip: str = "",
+        trace_id: str = "",
+        span_id: str = "",
+        timestamp: datetime | None = None,
+        attributes: dict[str, Any] | None = None,
+        source: str | None = None,
+        corpus: str | None = None,
+    ) -> IngestSpansResult:
+        """Record a single retrieval event."""
+        ...
+
+    def ingest_spans(
+        self,
+        spans: Sequence[RetrievalSpan | dict[str, Any]],
+    ) -> IngestSpansResult:
+        """Send one or more retrieval spans."""
+        ...
+
+    def document_access_report(
+        self,
+        *,
+        window_start: datetime | str | None = None,
+        window_end: datetime | str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+    ) -> DocumentAccessReport:
+        """Read how often chunks are retrieved, grouped by document."""
+        ...
+
+
+class HardshellClient(TelemetryClient):
     """Client for sending telemetry to Hardshell and reading reports back.
 
     Args:
@@ -96,6 +178,14 @@ class HardshellClient:
             environment-scoped — any value you send overrides the key's
             default. Pass ``""`` at call level to force a payload through
             unlabeled. Raw dict spans are never modified.
+        corpus: Default corpus (vector store) for everything this client sends,
+            named ``"backend:collection"`` e.g. ``"qdrant:docs-prod"`` (see
+            :func:`hardshell_telemetry.corpus_name`). Tagging ingest and
+            retrievals with it lets Hardshell show how a document is retrieved
+            across every index it lives in. Resolves exactly like ``source``:
+            an explicit per-call/per-span ``corpus`` wins, then this client
+            default, otherwise the payload carries no corpus. Most apps talk to
+            one store — set it once here and forget it.
     """
 
     def __init__(
@@ -105,6 +195,7 @@ class HardshellClient:
         *,
         timeout: float = 5.0,
         source: str | None = None,
+        corpus: str | None = None,
     ) -> None:
         if not api_key:
             raise ValueError("Hardshell api_key is required")
@@ -113,6 +204,7 @@ class HardshellClient:
         self._base = base_url.rstrip("/")
         self._timeout = timeout
         self._source = source
+        self._corpus = corpus
         self._headers = {
             "Authorization": "Bearer " + api_key,
             "Content-Type": "application/json",
@@ -129,14 +221,16 @@ class HardshellClient:
         documents: Sequence[Document | dict[str, Any]],
         *,
         source: str | None = None,
+        corpus: str | None = None,
     ) -> IngestDocumentsResult:
         """Upsert source-document metadata (``POST /v1/documents``).
 
-        ``source`` labels the provenance of this push (see
+        ``source`` labels the provenance of this push and ``corpus`` registers
+        every document into the named vector store (see
         :class:`HardshellClient`); ``None`` inherits the client default.
         """
         return IngestDocumentsResult.from_payload(
-            self._post_batch("/v1/documents", "documents", documents, source)
+            self._post_batch("/v1/documents", "documents", documents, source, corpus)
         )
 
     def ingest_chunks(
@@ -144,14 +238,16 @@ class HardshellClient:
         chunks: Sequence[Chunk | dict[str, Any]],
         *,
         source: str | None = None,
+        corpus: str | None = None,
     ) -> IngestChunksResult:
         """Upsert per-chunk metadata (``POST /v1/chunks``).
 
-        ``source`` labels the provenance of this push (see
+        ``source`` labels the provenance of this push and ``corpus`` names the
+        vector store the chunks' documents are registered into (see
         :class:`HardshellClient`); ``None`` inherits the client default.
         """
         return IngestChunksResult.from_payload(
-            self._post_batch("/v1/chunks", "chunks", chunks, source)
+            self._post_batch("/v1/chunks", "chunks", chunks, source, corpus)
         )
 
     # ── Retrieval data plane (query time) ───────────────────────────────────
@@ -169,14 +265,16 @@ class HardshellClient:
         timestamp: datetime | None = None,
         attributes: dict[str, Any] | None = None,
         source: str | None = None,
+        corpus: str | None = None,
     ) -> IngestSpansResult:
         """Send a single retrieval event — the common case.
 
         Call this after each vector-store query with the chunks it returned.
         Chunks can be ``(chunk_id, score)`` tuples, :class:`RetrievedChunk`
         instances, dicts, or bare chunk-id strings. ``source`` labels the
-        provenance of this event (see :class:`HardshellClient`); ``None``
-        inherits the client default.
+        provenance of this event and ``corpus`` names the vector store it read
+        from (see :class:`HardshellClient`); ``None`` inherits the client
+        default.
         """
         span = RetrievalSpan(
             chunks=chunks,
@@ -189,6 +287,7 @@ class HardshellClient:
             span_id=span_id,
             attributes=attributes or {},
             source=source,
+            corpus=corpus,
         )
         return self.ingest_spans([span])
 
@@ -198,9 +297,9 @@ class HardshellClient:
     ) -> IngestSpansResult:
         """Send one or more retrieval spans (``POST /v1/spans``).
 
-        Typed spans whose ``source`` was left as ``None`` inherit the
-        client's default source; a span-level value (including ``""`` for
-        explicitly unlabeled) wins. Raw dict spans are sent verbatim — never
+        Typed spans whose ``source`` or ``corpus`` was left as ``None`` inherit
+        the client's defaults; a span-level value (including ``""`` for
+        explicitly unset) wins. Raw dict spans are sent verbatim — never
         modified — so the server can apply its own defaults to them.
         """
         serialized = []
@@ -209,6 +308,8 @@ class HardshellClient:
                 payload = span.to_payload()
                 if span.source is None and self._source:
                     payload["source"] = self._source
+                if span.corpus is None and self._corpus:
+                    payload["corpus"] = self._corpus
             else:
                 payload = dict(span)
             serialized.append(payload)
@@ -252,11 +353,15 @@ class HardshellClient:
         key: str,
         items: Sequence[Any],
         source: str | None,
+        corpus: str | None,
     ) -> dict[str, Any]:
-        effective = source if source is not None else self._source
         payload: dict[str, Any] = {key: [_payload_of(i) for i in items]}
-        if effective:
-            payload["source"] = effective
+        effective_source = source if source is not None else self._source
+        if effective_source:
+            payload["source"] = effective_source
+        effective_corpus = corpus if corpus is not None else self._corpus
+        if effective_corpus:
+            payload["corpus"] = effective_corpus
         return self._post(path, payload)
 
     def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:

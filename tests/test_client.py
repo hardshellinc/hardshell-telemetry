@@ -13,6 +13,7 @@ from hardshell_telemetry import (
     HardshellClient,
     RetrievalSpan,
     RetrievedChunk,
+    TelemetryClient,
     TelemetryError,
 )
 
@@ -219,6 +220,105 @@ class TestDocumentAccessReport:
         assert report.total_documents == 1
         assert report.documents[0].chunks[0].access_count == 3
 
+    def test_corpora_breakdown_parsed(self, edge, client):
+        edge.respond(
+            "GET",
+            "/v1/reports/document-access",
+            body={
+                "documents": [
+                    {
+                        "document_id": "doc-1",
+                        "name": "handbook",
+                        "chunk_count": 1,
+                        "chunks": [{"chunk_id": "c-1", "access_count": 4}],
+                        "corpora": [
+                            {"corpus": "", "access_count": 1},
+                            {"corpus": "qdrant:docs-prod", "access_count": 3},
+                        ],
+                    }
+                ],
+                "total_documents": 1,
+            },
+        )
+        doc = client.document_access_report().documents[0]
+        assert [(c.corpus, c.access_count) for c in doc.corpora] == [
+            ("", 1),
+            ("qdrant:docs-prod", 3),
+        ]
+        # Breakdown slices the same accesses as the per-chunk counts.
+        assert sum(c.access_count for c in doc.corpora) == sum(c.access_count for c in doc.chunks)
+
+    def test_corpora_absent_when_server_omits_it(self, edge, client):
+        # A pre-corpus server never sends `corpora`, even when chunks were
+        # retrieved — the field defaults empty and won't sum to `chunks`.
+        edge.respond(
+            "GET",
+            "/v1/reports/document-access",
+            body={
+                "documents": [
+                    {
+                        "document_id": "doc-1",
+                        "chunk_count": 1,
+                        "chunks": [{"chunk_id": "c-1", "access_count": 5}],
+                    },
+                ],
+                "total_documents": 1,
+            },
+        )
+        doc = client.document_access_report().documents[0]
+        assert doc.corpora == ()
+        assert sum(c.access_count for c in doc.chunks) == 5  # accesses present, breakdown absent
+
+
+class TestCorpus:
+    """`corpus` plumbs exactly like `source`: client default, per-call
+    override, `""` to force unset, and request- vs span-level placement."""
+
+    def test_client_corpus_is_default_on_documents_and_chunks(self, edge):
+        client = HardshellClient(api_key="k", base_url=edge.base_url, corpus="qdrant:docs-prod")
+        client.ingest_documents([Document(document_id="d-1")])
+        assert edge.last.json["corpus"] == "qdrant:docs-prod"
+        client.ingest_chunks([Chunk(chunk_id="c-1")])
+        assert edge.last.json["corpus"] == "qdrant:docs-prod"
+
+    def test_call_corpus_overrides_client_default(self, edge):
+        client = HardshellClient(api_key="k", base_url=edge.base_url, corpus="qdrant:docs-prod")
+        client.ingest_documents([Document(document_id="d-1")], corpus="pgvector:kb")
+        assert edge.last.json["corpus"] == "pgvector:kb"
+
+    def test_empty_string_corpus_forces_unset(self, edge):
+        client = HardshellClient(api_key="k", base_url=edge.base_url, corpus="qdrant:docs-prod")
+        client.ingest_documents([Document(document_id="d-1")], corpus="")
+        assert "corpus" not in edge.last.json
+
+    def test_unset_client_omits_corpus(self, edge, client):
+        client.ingest_documents([Document(document_id="d-1")])
+        assert "corpus" not in edge.last.json
+
+    def test_record_retrieval_sends_corpus(self, edge, client):
+        client.record_retrieval(chunks=["c-1"], backend="qdrant", corpus="qdrant:docs-prod")
+        assert edge.last.json["spans"][0]["corpus"] == "qdrant:docs-prod"
+
+    def test_span_with_unset_corpus_inherits_client_default(self, edge):
+        client = HardshellClient(api_key="k", base_url=edge.base_url, corpus="qdrant:docs-prod")
+        client.ingest_spans([RetrievalSpan(chunks=["c-1"], backend="qdrant")])
+        assert edge.last.json["spans"][0]["corpus"] == "qdrant:docs-prod"
+
+    def test_span_level_corpus_wins_over_client_default(self, edge):
+        client = HardshellClient(api_key="k", base_url=edge.base_url, corpus="qdrant:docs-prod")
+        client.ingest_spans([RetrievalSpan(chunks=["c-1"], backend="pg", corpus="pgvector:kb")])
+        assert edge.last.json["spans"][0]["corpus"] == "pgvector:kb"
+
+    def test_empty_string_span_corpus_forces_unset(self, edge):
+        client = HardshellClient(api_key="k", base_url=edge.base_url, corpus="qdrant:docs-prod")
+        client.record_retrieval(chunks=["c-1"], corpus="")
+        assert "corpus" not in edge.last.json["spans"][0]
+
+    def test_raw_dict_spans_never_get_client_corpus(self, edge):
+        client = HardshellClient(api_key="k", base_url=edge.base_url, corpus="qdrant:docs-prod")
+        client.ingest_spans([{"backend": "qdrant", "chunks": []}])
+        assert "corpus" not in edge.last.json["spans"][0]
+
 
 class TestErrors:
     def test_http_error_carries_status_and_detail(self, edge, client):
@@ -281,6 +381,31 @@ class TestErrors:
             client.document_access_report()
         assert excinfo.value.method == "GET"
         assert excinfo.value.path == "/v1/reports/document-access"
+
+
+class TestTelemetryClientInterface:
+    """HardshellClient implements the transport-agnostic TelemetryClient
+    protocol, and any object with the same methods conforms structurally — so
+    an internal gRPC client can be a drop-in without importing HardshellClient."""
+
+    def test_rest_client_is_a_telemetry_client(self, client):
+        assert isinstance(client, TelemetryClient)
+
+    def test_structural_conformance_without_inheritance(self):
+        class GrpcTelemetryClient:  # a stand-in for an alternate transport
+            def ingest_documents(self, documents, *, source=None, corpus=None): ...
+            def ingest_chunks(self, chunks, *, source=None, corpus=None): ...
+            def record_retrieval(self, chunks, **kwargs): ...
+            def ingest_spans(self, spans): ...
+            def document_access_report(self, **kwargs): ...
+
+        assert isinstance(GrpcTelemetryClient(), TelemetryClient)
+
+    def test_missing_a_method_fails_the_check(self):
+        class Incomplete:
+            def ingest_documents(self, documents, *, source=None, corpus=None): ...
+
+        assert not isinstance(Incomplete(), TelemetryClient)
 
 
 class TestFakeEdgeIsolation:
