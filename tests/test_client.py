@@ -249,18 +249,25 @@ class TestDocumentAccessReport:
         assert sum(c.access_count for c in doc.corpora) == sum(c.access_count for c in doc.chunks)
 
     def test_corpora_absent_when_server_omits_it(self, edge, client):
-        # A pre-corpus server never sends `corpora`; the field defaults empty.
+        # A pre-corpus server never sends `corpora`, even when chunks were
+        # retrieved — the field defaults empty and won't sum to `chunks`.
         edge.respond(
             "GET",
             "/v1/reports/document-access",
             body={
                 "documents": [
-                    {"document_id": "doc-1", "chunk_count": 0, "chunks": []},
+                    {
+                        "document_id": "doc-1",
+                        "chunk_count": 1,
+                        "chunks": [{"chunk_id": "c-1", "access_count": 5}],
+                    },
                 ],
                 "total_documents": 1,
             },
         )
-        assert client.document_access_report().documents[0].corpora == ()
+        doc = client.document_access_report().documents[0]
+        assert doc.corpora == ()
+        assert sum(c.access_count for c in doc.chunks) == 5  # accesses present, breakdown absent
 
 
 class TestCorpus:

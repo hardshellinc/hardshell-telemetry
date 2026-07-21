@@ -79,18 +79,23 @@ class TelemetryClient(Protocol):
 
     :class:`HardshellClient` is the REST implementation shipped here. Code that
     only needs to *send* telemetry and *read* reports can depend on this
-    protocol instead, and swap in another backend — e.g. an internal gRPC
-    client — that speaks the same methods over the same shared payload and
-    result types (:class:`~hardshell_telemetry.Document`,
+    protocol instead, and swap in another backend that speaks the same methods
+    over the same shared payload and result types (
+    :class:`~hardshell_telemetry.Document`,
     :class:`~hardshell_telemetry.Chunk`,
     :class:`~hardshell_telemetry.RetrievalSpan`,
-    :class:`~hardshell_telemetry.DocumentAccessReport`, …).
+    :class:`~hardshell_telemetry.DocumentAccessReport`,
+    …).
 
     Any object with these methods satisfies it structurally; subclass it
     explicitly (as :class:`HardshellClient` does) for a static check that an
     implementation stays in sync with the contract. Construction is
     intentionally not part of the contract — each transport is built its own
-    way (an API key and base URL here; a channel or stub elsewhere).
+    way (an API key and base URL here; a channel or stub elsewhere).  While we
+    obviously hope you'll use our system, it is not the intent of this repo to
+    lock you in to using Hardshell, and you could easily put in a Datadog or
+    other telemetry platform client in place of ours, or wrap ours for dual
+    logging.
     """
 
     def ingest_documents(

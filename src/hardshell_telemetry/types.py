@@ -356,10 +356,11 @@ class CorpusAccessCount:
 class DocumentAccessSummary:
     """How often one document's chunks were retrieved in the window.
 
-    ``corpora`` breaks the same retrievals down by the corpus each read from —
-    the "this document across every index it lives in" view. It sums to the
-    same total as ``chunks`` (the same accesses, sliced by corpus instead of
-    by chunk) and is empty if the document had no retrievals in the window.
+    When the server supplies the breakdown, ``corpora`` re-slices the same
+    retrievals as ``chunks`` by the corpus each read from — the "this document
+    across every index it lives in" view — and sums to the same total. It is
+    empty when the document had no retrievals in the window, or when the server
+    predates corpus support (older servers omit it, so the totals won't match).
     """
 
     document_id: str

@@ -201,8 +201,8 @@ client.record_retrieval(chunks=[("employee-handbook:0001", 0.88)],
 **Naming.** Use `backend:collection`, lowercase and stable — `corpus_name()`
 builds it for you. A bare collection name collides across stores, and a name
 that drifts by a stray capital or space is a *different* corpus, which splits
-your reports. (Our `Retriever`/`Ingestor` fronts derive the name from your
-store handle automatically; at this layer you set it.)
+your reports. (Our `Retriever`/`Ingestor` fronts will derive the name from your
+store handle automatically once they ship; until then you set it here.)
 
 ### Seeing it back
 
@@ -219,8 +219,9 @@ for doc in report.documents:
 # employee-handbook · pgvector:kb: 3      ← same doc, served from a second index
 ```
 
-`doc.corpora` sums to the same total as `doc.chunks` — the same accesses,
-sliced by index instead of by chunk.
+When the server returns the breakdown, `doc.corpora` sums to the same total as
+`doc.chunks` — the same accesses, sliced by index instead of by chunk. (Older
+servers omit it, so `doc.corpora` comes back empty.)
 
 ## Reading reports
 

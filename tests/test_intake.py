@@ -147,3 +147,8 @@ class TestCorpusName:
     def test_colon_in_collection_rejected(self):
         with pytest.raises(ValueError, match="may not contain ':'"):
             corpus_name("qdrant", "docs:prod")
+
+    def test_colon_in_backend_rejected(self):
+        # A backend with a colon would make "qdrant:prod:docs" ambiguous.
+        with pytest.raises(ValueError, match="may not contain ':'"):
+            corpus_name("qdrant:prod", "docs")

@@ -145,10 +145,10 @@ def corpus_name(backend: str, collection: str) -> str:
     collection = collection.strip().lower()
     if not backend or not collection:
         raise ValueError("corpus_name needs a non-empty backend and collection")
-    if ":" in collection:
+    if ":" in backend or ":" in collection:
         raise ValueError(
-            f"collection may not contain ':' (got {collection!r}) — ':' separates "
-            "the backend from the collection in a corpus name"
+            f"backend and collection may not contain ':' (got {backend!r}, {collection!r}) — "
+            "':' separates the backend from the collection in a corpus name"
         )
     return f"{backend}:{collection}"
 
