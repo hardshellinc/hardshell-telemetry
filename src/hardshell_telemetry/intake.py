@@ -27,6 +27,7 @@ __all__ = [
     "DEFAULT_SENSITIVITY_SCALE",
     "HARDSHELL_DOC_NAMESPACE",
     "content_hash",
+    "corpus_name",
     "derive_chunk_id",
     "derive_document_id",
     "sensitivity_from_level",
@@ -124,6 +125,32 @@ def derive_chunk_id(
     if content is not None:
         return f"{base}{separator}{content_hash(content)[:content_hash_chars]}"
     return base
+
+
+def corpus_name(backend: str, collection: str) -> str:
+    """Build a corpus name from your vector store and its collection.
+
+    The convention is ``"backend:collection"`` (e.g. ``"qdrant:docs-prod"``),
+    lowercased and whitespace-trimmed so a stray capital or space can't fork
+    one corpus into two across your reports. A bare collection name collides
+    across stores — qualifying it with the backend keeps ``docs`` in Qdrant
+    distinct from ``docs`` in pgvector.
+
+    The corpus name is a label Hardshell groups retrievals by; it need not
+    equal the store's literal collection name, but every reference to the same
+    store must produce the same name — reuse this helper (or a constant) rather
+    than hand-writing the string in more than one place.
+    """
+    backend = backend.strip().lower()
+    collection = collection.strip().lower()
+    if not backend or not collection:
+        raise ValueError("corpus_name needs a non-empty backend and collection")
+    if ":" in collection:
+        raise ValueError(
+            f"collection may not contain ':' (got {collection!r}) — ':' separates "
+            "the backend from the collection in a corpus name"
+        )
+    return f"{backend}:{collection}"
 
 
 def sensitivity_from_level(

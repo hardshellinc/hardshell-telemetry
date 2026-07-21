@@ -10,6 +10,7 @@ import pytest
 from hardshell_telemetry import (
     Chunk,
     ChunkAccessCount,
+    CorpusAccessCount,
     Document,
     DocumentAccessReport,
     DocumentLink,
@@ -147,6 +148,11 @@ class TestRetrievalSpan:
         payload = RetrievalSpan(chunks=["c-1"], backend="chroma").to_payload()
         assert set(payload) == {"backend", "timestamp", "chunks"}
 
+    def test_corpus_carried_when_set_omitted_when_none(self):
+        with_corpus = RetrievalSpan(chunks=["c-1"], backend="qdrant", corpus="qdrant:docs")
+        assert with_corpus.to_payload()["corpus"] == "qdrant:docs"
+        assert "corpus" not in RetrievalSpan(chunks=["c-1"], backend="qdrant").to_payload()
+
     def test_timestamp_captured_at_construction_not_send_time(self):
         span = RetrievalSpan(chunks=["c-1"])
         first = span.to_payload()["timestamp"]
@@ -191,4 +197,27 @@ class TestResultParsing:
         assert report.documents[0].chunks == (
             ChunkAccessCount("c-1", 7),
             ChunkAccessCount("c-2", 0),
+        )
+        assert report.documents[0].corpora == ()  # absent in payload → empty
+
+    def test_document_access_report_parses_corpora_breakdown(self):
+        report = DocumentAccessReport.from_payload(
+            {
+                "documents": [
+                    {
+                        "document_id": "doc-1",
+                        "chunk_count": 1,
+                        "chunks": [{"chunk_id": "c-1", "access_count": 3}],
+                        "corpora": [
+                            {"corpus": "", "access_count": 1},
+                            {"corpus": "qdrant:docs-prod", "access_count": 2},
+                        ],
+                    }
+                ],
+                "total_documents": 1,
+            }
+        )
+        assert report.documents[0].corpora == (
+            CorpusAccessCount("", 1),
+            CorpusAccessCount("qdrant:docs-prod", 2),
         )

@@ -15,6 +15,7 @@ from hardshell_telemetry import (
     DEFAULT_SENSITIVITY_SCALE,
     HARDSHELL_DOC_NAMESPACE,
     content_hash,
+    corpus_name,
     derive_chunk_id,
     derive_document_id,
     sensitivity_from_level,
@@ -128,3 +129,21 @@ class TestSensitivityFromLevel:
 
     def test_default_scale_is_public_constant(self):
         assert DEFAULT_SENSITIVITY_SCALE == ("public", "low", "medium", "high", "critical")
+
+
+class TestCorpusName:
+    def test_builds_backend_collection(self):
+        assert corpus_name("qdrant", "docs-prod") == "qdrant:docs-prod"
+
+    def test_lowercases_and_trims_so_names_cannot_fork(self):
+        assert corpus_name(" Qdrant ", " Docs-Prod ") == "qdrant:docs-prod"
+
+    def test_empty_parts_rejected(self):
+        with pytest.raises(ValueError, match="non-empty"):
+            corpus_name("qdrant", "")
+        with pytest.raises(ValueError, match="non-empty"):
+            corpus_name("", "docs")
+
+    def test_colon_in_collection_rejected(self):
+        with pytest.raises(ValueError, match="may not contain ':'"):
+            corpus_name("qdrant", "docs:prod")

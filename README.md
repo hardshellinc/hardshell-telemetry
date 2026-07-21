@@ -24,6 +24,8 @@ talks to it:
   for whom.
 - **Read reports** — pull derived signals back out, starting with
   document-access summaries.
+- **Group by corpus** — tag each vector store you retrieve from to see how a
+  single document is accessed across every index it lives in.
 
 The interactive API reference lives at `https://api.qa.hardshell.dev/docs`.
 Note that this is currently in development, and the endpoint is a QA endpoint!
@@ -91,11 +93,11 @@ pending.append(RetrievalSpan(chunks=[("c-1", 0.91)], backend="chroma", user_id="
 client.ingest_spans(pending)
 ```
 
-## Registering your corpus
+## Registering documents & chunks
 
 Retrievals are joined to document/chunk metadata by id, so register your
-corpus once per index build. **The chunk ids you register must be the same
-ids your retrieval path reports** — that id is the join key.
+documents and chunks once per index build. **The chunk ids you register must
+be the same ids your retrieval path reports** — that id is the join key.
 
 ```python
 from hardshell_telemetry import Chunk, Document, DocumentLink
@@ -154,6 +156,71 @@ from hardshell_telemetry import FixedSizeChunker, ParagraphChunker, SentenceChun
 chunks = FixedSizeChunker(800, overlap=100).chunk(text)
 chunks = ParagraphChunker(max_chars=1200).chunk(text)   # packs paragraphs, never cuts inside one
 ```
+
+## Corpora — one document across many indexes
+
+A **corpus** is a vector store you retrieve from, named `backend:collection`
+(e.g. `qdrant:docs-prod`, `pgvector:kb`). Tag your writes and your retrievals
+with it and Hardshell shows **how a single document is retrieved across every
+index it lives in** — the view that catches one document leaking through a
+store you forgot to lock down.
+
+`corpus` works exactly like [`source`](#labeling-traffic-with-source): set it
+once on the client, override per call, or omit it — same resolution order.
+
+```python
+from hardshell_telemetry import Chunk, Document, DocumentLink, HardshellClient, corpus_name
+
+client = HardshellClient(
+    api_key="hs-...",
+    base_url="https://<your-hardshell-endpoint>",
+    corpus=corpus_name("qdrant", "docs-prod"),   # default for everything this client sends
+)
+
+# index-build time — register the handbook into this corpus
+client.ingest_documents([Document(document_id="employee-handbook")])
+client.ingest_chunks([
+    Chunk(chunk_id="employee-handbook:0001",
+          document_links=[DocumentLink(document_id="employee-handbook")]),
+])
+
+# query time — the retrieval inherits the client's corpus, nothing extra to pass
+client.record_retrieval(chunks=[("employee-handbook:0001", 0.92)], backend="qdrant")
+```
+
+Indexing the same document into a second store? A document can belong to many
+corpora — override per call:
+
+```python
+client.ingest_documents([Document(document_id="employee-handbook")],
+                        corpus="pgvector:kb")
+client.record_retrieval(chunks=[("employee-handbook:0001", 0.88)],
+                       backend="pgvector", corpus="pgvector:kb")
+```
+
+**Naming.** Use `backend:collection`, lowercase and stable — `corpus_name()`
+builds it for you. A bare collection name collides across stores, and a name
+that drifts by a stray capital or space is a *different* corpus, which splits
+your reports. (Our `Retriever`/`Ingestor` fronts derive the name from your
+store handle automatically; at this layer you set it.)
+
+### Seeing it back
+
+The document-access report breaks each document's retrievals down by the
+corpus they read from — unlabeled traffic buckets under `""`:
+
+```python
+report = client.document_access_report(limit=20)
+for doc in report.documents:
+    for c in doc.corpora:
+        print(f"{doc.document_id} · {c.corpus or '(unlabeled)'}: {c.access_count}")
+
+# employee-handbook · qdrant:docs-prod: 141
+# employee-handbook · pgvector:kb: 3      ← same doc, served from a second index
+```
+
+`doc.corpora` sums to the same total as `doc.chunks` — the same accesses,
+sliced by index instead of by chunk.
 
 ## Reading reports
 
