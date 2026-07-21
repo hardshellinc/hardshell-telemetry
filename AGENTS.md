@@ -11,6 +11,7 @@ uv run pytest        # full test suite; fast, no network beyond 127.0.0.1
 uv run ruff check .  # lint
 uv run ruff format --check .  # formatting
 uv run ty check      # type-check
+make precommit       # lint + format-check + type-check + test (mirrors CI); run before committing
 uv build             # build wheel + sdist into dist/
 ```
 

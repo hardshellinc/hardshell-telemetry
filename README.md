@@ -302,11 +302,13 @@ retrieval recording, and report reading. Each takes `HARDSHELL_API_KEY` and
 
 ```sh
 uv sync          # install with dev dependencies
-uv run pytest    # tests run against a local fake server; no network
-uv run ruff check . && uv run ruff format --check .
-uv run ty check  # type-check
+make precommit   # lint, format-check, type-check, and test — what CI runs on a PR
 uv build         # wheel + sdist
 ```
+
+`make precommit` is the one-shot gate; the individual steps are also available
+as `make lint` / `make format` / `make typecheck` / `make test` (each just
+wraps the matching `uv run …`).
 
 ## Appendix: how we chose document identity
 
