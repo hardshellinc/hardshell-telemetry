@@ -13,6 +13,7 @@ from hardshell_telemetry import (
     HardshellClient,
     RetrievalSpan,
     RetrievedChunk,
+    TelemetryClient,
     TelemetryError,
 )
 
@@ -373,6 +374,31 @@ class TestErrors:
             client.document_access_report()
         assert excinfo.value.method == "GET"
         assert excinfo.value.path == "/v1/reports/document-access"
+
+
+class TestTelemetryClientInterface:
+    """HardshellClient implements the transport-agnostic TelemetryClient
+    protocol, and any object with the same methods conforms structurally — so
+    an internal gRPC client can be a drop-in without importing HardshellClient."""
+
+    def test_rest_client_is_a_telemetry_client(self, client):
+        assert isinstance(client, TelemetryClient)
+
+    def test_structural_conformance_without_inheritance(self):
+        class GrpcTelemetryClient:  # a stand-in for an alternate transport
+            def ingest_documents(self, documents, *, source=None, corpus=None): ...
+            def ingest_chunks(self, chunks, *, source=None, corpus=None): ...
+            def record_retrieval(self, chunks, **kwargs): ...
+            def ingest_spans(self, spans): ...
+            def document_access_report(self, **kwargs): ...
+
+        assert isinstance(GrpcTelemetryClient(), TelemetryClient)
+
+    def test_missing_a_method_fails_the_check(self):
+        class Incomplete:
+            def ingest_documents(self, documents, *, source=None, corpus=None): ...
+
+        assert not isinstance(Incomplete(), TelemetryClient)
 
 
 class TestFakeEdgeIsolation:

@@ -36,7 +36,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Sequence
 from datetime import datetime
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from hardshell_telemetry._version import __version__
 from hardshell_telemetry.exceptions import TelemetryError
@@ -52,7 +52,7 @@ from hardshell_telemetry.types import (
     iso_timestamp,
 )
 
-__all__ = ["HardshellClient"]
+__all__ = ["HardshellClient", "TelemetryClient"]
 
 
 class _NoRedirects(urllib.request.HTTPRedirectHandler):
@@ -73,7 +73,84 @@ def _payload_of(item: Any) -> dict[str, Any]:
     return dict(item)
 
 
-class HardshellClient:
+@runtime_checkable
+class TelemetryClient(Protocol):
+    """The telemetry client contract, independent of transport.
+
+    :class:`HardshellClient` is the REST implementation shipped here. Code that
+    only needs to *send* telemetry and *read* reports can depend on this
+    protocol instead, and swap in another backend — e.g. an internal gRPC
+    client — that speaks the same methods over the same shared payload and
+    result types (:class:`~hardshell_telemetry.Document`,
+    :class:`~hardshell_telemetry.Chunk`,
+    :class:`~hardshell_telemetry.RetrievalSpan`,
+    :class:`~hardshell_telemetry.DocumentAccessReport`, …).
+
+    Any object with these methods satisfies it structurally; subclass it
+    explicitly (as :class:`HardshellClient` does) for a static check that an
+    implementation stays in sync with the contract. Construction is
+    intentionally not part of the contract — each transport is built its own
+    way (an API key and base URL here; a channel or stub elsewhere).
+    """
+
+    def ingest_documents(
+        self,
+        documents: Sequence[Document | dict[str, Any]],
+        *,
+        source: str | None = None,
+        corpus: str | None = None,
+    ) -> IngestDocumentsResult:
+        """Upsert source-document metadata."""
+        ...
+
+    def ingest_chunks(
+        self,
+        chunks: Sequence[Chunk | dict[str, Any]],
+        *,
+        source: str | None = None,
+        corpus: str | None = None,
+    ) -> IngestChunksResult:
+        """Upsert per-chunk metadata."""
+        ...
+
+    def record_retrieval(
+        self,
+        chunks: Sequence[RetrievedChunkLike],
+        *,
+        backend: str = "",
+        user_id: str = "",
+        session_id: str = "",
+        ip: str = "",
+        trace_id: str = "",
+        span_id: str = "",
+        timestamp: datetime | None = None,
+        attributes: dict[str, Any] | None = None,
+        source: str | None = None,
+        corpus: str | None = None,
+    ) -> IngestSpansResult:
+        """Record a single retrieval event."""
+        ...
+
+    def ingest_spans(
+        self,
+        spans: Sequence[RetrievalSpan | dict[str, Any]],
+    ) -> IngestSpansResult:
+        """Send one or more retrieval spans."""
+        ...
+
+    def document_access_report(
+        self,
+        *,
+        window_start: datetime | str | None = None,
+        window_end: datetime | str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+    ) -> DocumentAccessReport:
+        """Read how often chunks are retrieved, grouped by document."""
+        ...
+
+
+class HardshellClient(TelemetryClient):
     """Client for sending telemetry to Hardshell and reading reports back.
 
     Args:

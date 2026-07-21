@@ -235,6 +235,33 @@ for doc in report.documents:
     print(doc.document_id, sum(c.access_count for c in doc.chunks))
 ```
 
+## The `TelemetryClient` interface
+
+`HardshellClient` implements `TelemetryClient`, a transport-agnostic protocol
+covering the five public methods (`ingest_documents`, `ingest_chunks`,
+`record_retrieval`, `ingest_spans`, `document_access_report`). Type your own
+code against it and the transport becomes swappable — the REST client here, or
+an internal client that speaks the same methods over gRPC:
+
+```python
+from hardshell_telemetry import TelemetryClient
+
+class SearchService:
+    def __init__(self, telemetry: TelemetryClient):
+        self._telemetry = telemetry            # HardshellClient, or your own transport
+
+    def search(self, query: str, user_id: str):
+        hits = self._store.query(query)
+        self._telemetry.record_retrieval(
+            chunks=[(h.id, h.score) for h in hits], user_id=user_id, backend="qdrant",
+        )
+        return hits
+```
+
+Any object with those methods satisfies the protocol — it's `@runtime_checkable`,
+so `isinstance(x, TelemetryClient)` works too — and the shared payload and
+result types travel with it.
+
 ## The `hardshell` CLI
 
 Installed with the package. Set `HARDSHELL_API_KEY` and `HARDSHELL_BASE_URL`,

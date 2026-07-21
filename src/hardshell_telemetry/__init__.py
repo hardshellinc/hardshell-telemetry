@@ -7,7 +7,7 @@ from hardshell_telemetry.chunking import (
     ParagraphChunker,
     SentenceChunker,
 )
-from hardshell_telemetry.client import HardshellClient
+from hardshell_telemetry.client import HardshellClient, TelemetryClient
 from hardshell_telemetry.exceptions import TelemetryError
 from hardshell_telemetry.ids import (
     DEFAULT_ID_STRATEGY,
@@ -74,6 +74,7 @@ __all__ = [
     "RetrievalSpan",
     "RetrievedChunk",
     "SentenceChunker",
+    "TelemetryClient",
     "TelemetryError",
     "__version__",
     "content_hash",
