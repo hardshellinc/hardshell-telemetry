@@ -263,6 +263,45 @@ Any object with those methods satisfies the protocol — it's `@runtime_checkabl
 so `isinstance(x, TelemetryClient)` works too — and the shared payload and
 result types travel with it.
 
+## Testing your integration
+
+`hardshell_telemetry.testing` ships a `MockTelemetryClient` — an in-memory
+`TelemetryClient` that records every call and sends nothing. Inject it into
+the code above and assert on what it recorded, no network or fake server:
+
+```python
+from hardshell_telemetry.testing import MockTelemetryClient
+
+def test_search_records_a_retrieval():
+    telemetry = MockTelemetryClient()
+    SearchService(telemetry).search("hr policy", user_id="u-1")
+
+    span = telemetry.spans[0]                 # every span, flattened across calls
+    assert span.user_id == "u-1"
+    assert [c["chunk_id"] for c in span.to_payload()["chunks"]] == ["hr-1", "hr-2"]
+```
+
+Ingest calls are recorded too (`telemetry.documents` / `.chunks`, plus
+per-call `source`/`corpus` on `telemetry.ingest_documents_calls`), and the
+ingest methods return results with truthful counts. To test code that *reads*
+reports, seed one — the `make_*` factories keep fixtures short:
+
+```python
+from hardshell_telemetry import ChunkAccessCount, CorpusAccessCount
+from hardshell_telemetry.testing import MockTelemetryClient, make_report, make_summary
+
+telemetry = MockTelemetryClient(report=make_report([
+    make_summary("handbook",
+                 chunks=[ChunkAccessCount("handbook:0", 144)],
+                 corpora=[CorpusAccessCount("qdrant:docs-prod", 141),
+                          CorpusAccessCount("pgvector:kb", 3)]),
+]))
+assert usage_dashboard(telemetry).top_document() == "handbook"
+```
+
+Also available: `make_document`, `make_chunk` (auto-links to a document), and
+`make_span`.
+
 ## The `hardshell` CLI
 
 Installed with the package. Set `HARDSHELL_API_KEY` and `HARDSHELL_BASE_URL`,
